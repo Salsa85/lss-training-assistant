@@ -379,3 +379,51 @@ class SheetsAgent:
                 }
         
         return trends 
+
+    def _get_previous_period_data(self, period):
+        """Get data from the previous period for comparison"""
+        if not isinstance(period, dict):
+            return None
+        
+        previous_data = self.sheet_data.copy()
+        
+        if period['type'] == 'specific_month':
+            # Get previous month's data
+            if period['month'] == 1:
+                prev_month = 12
+                prev_year = period['year'] - 1
+            else:
+                prev_month = period['month'] - 1
+                prev_year = period['year']
+            
+            previous_data = previous_data[
+                (previous_data['Datum Inschrijving'].dt.month == prev_month) &
+                (previous_data['Datum Inschrijving'].dt.year == prev_year)
+            ]
+        
+        elif period['type'] == 'year':
+            # Get previous year's data
+            previous_data = previous_data[
+                previous_data['Datum Inschrijving'].dt.year == period['year'] - 1
+            ]
+        
+        elif period['type'] == 'current_month':
+            # Get previous month's data
+            current_date = pd.Timestamp.now()
+            previous_month = (current_date - pd.DateOffset(months=1))
+            previous_data = previous_data[
+                previous_data['Datum Inschrijving'].dt.to_period('M') == 
+                previous_month.to_period('M')
+            ]
+        
+        elif period['type'] == 'current_year':
+            # Get previous year's data
+            current_year = pd.Timestamp.now().year
+            previous_data = previous_data[
+                previous_data['Datum Inschrijving'].dt.year == current_year - 1
+            ]
+        
+        else:
+            return None
+        
+        return previous_data if not previous_data.empty else None 
