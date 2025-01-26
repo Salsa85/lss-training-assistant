@@ -12,6 +12,7 @@ from fastapi import HTTPException
 import os
 import logging
 from ratelimit import limits, sleep_and_retry
+import json
 
 # Setup logging
 logging.basicConfig(
@@ -26,34 +27,34 @@ MAX_REQUESTS_PER_MINUTE = 50  # Aanpassen aan je OpenAI limiet
 class SheetsAgent:
     def __init__(self, credentials_file, spreadsheet_id):
         self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-        self.credentials_file = credentials_file
         self.spreadsheet_id = spreadsheet_id
         
         # Initialize OpenAI
         openai_key = os.getenv('OPENAI_API_KEY')
         if not openai_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
-        self.client = OpenAI()  # Laat OpenAI de key uit de environment halen
+        self.client = OpenAI()
         
+        # Initialize Google Sheets service
         self.sheet_service = self._get_sheets_service()
         self.sheet_data = None
         
     def _get_sheets_service(self):
-        creds = None
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
-                creds = pickle.load(token)
-                
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_file, self.SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-                
+        # For Railway deployment
+        if os.getenv('RAILWAY_ENVIRONMENT'):
+            creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
+            if not creds_json:
+                raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment")
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_authorized_user_info(creds_dict, self.SCOPES)
+        else:
+            # For local development
+            if not os.path.exists(self.credentials_file):
+                raise ValueError(f"Credentials file not found at {self.credentials_file}")
+            flow = InstalledAppFlow.from_client_secrets_file(
+                self.credentials_file, self.SCOPES)
+            creds = flow.run_local_server(port=0)
+        
         return build('sheets', 'v4', credentials=creds)
     
     def load_sheet_data(self, range_name):
