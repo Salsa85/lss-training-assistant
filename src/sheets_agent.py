@@ -29,17 +29,11 @@ class SheetsAgent:
         self.credentials_file = credentials_file
         self.spreadsheet_id = spreadsheet_id
         
-        # Initialize OpenAI with better error handling
-        try:
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if not openai_key:
-                raise ValueError("OPENAI_API_KEY not found in environment variables")
-            self.client = OpenAI(
-                api_key=openai_key
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
-            raise
+        # Initialize OpenAI
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+        self.client = OpenAI()  # Laat OpenAI de key uit de environment halen
         
         self.sheet_service = self._get_sheets_service()
         self.sheet_data = None
