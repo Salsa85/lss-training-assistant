@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from .sheets_agent import SheetsAgent
-from .config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
+from sheets_agent import SheetsAgent
+from config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
 import logging
 from datetime import datetime
 from prometheus_client import Counter, Histogram
