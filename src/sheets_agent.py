@@ -1,4 +1,4 @@
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -30,9 +30,8 @@ class SheetsAgent:
         self.credentials_file = credentials_file  # Nodig voor lokale ontwikkeling
         self.spreadsheet_id = spreadsheet_id
         
-        # Initialize OpenAI
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if not openai_key:
+        # Initialize OpenAI (simplified)
+        if not os.getenv('OPENAI_API_KEY'):
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         self.client = OpenAI()
         
@@ -46,8 +45,18 @@ class SheetsAgent:
             creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
             if not creds_json:
                 raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment")
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_authorized_user_info(creds_dict, self.SCOPES)
+            try:
+                creds_dict = json.loads(creds_json)
+                # Check if we have a refresh token
+                if 'refresh_token' in creds_dict:
+                    creds = Credentials.from_authorized_user_info(creds_dict, self.SCOPES)
+                else:
+                    # Fall back to client secrets
+                    flow = InstalledAppFlow.from_client_config(creds_dict, self.SCOPES)
+                    creds = flow.run_local_server(port=0)
+            except Exception as e:
+                logger.error(f"Error initializing credentials: {str(e)}")
+                raise
         else:
             # For local development
             if not os.path.exists(self.credentials_file):
@@ -122,34 +131,24 @@ class SheetsAgent:
         if self.sheet_data is None:
             raise ValueError('Sheet data not loaded. Call load_sheet_data first.')
         
-        # Get current date and start of current month
-        current_date = pd.Timestamp.now()
-        current_month_start = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        
-        # Filter data for current month
-        current_month_data = self.sheet_data[
-            self.sheet_data['Datum Inschrijving'].dt.to_period('M') == 
-            current_date.to_period('M')
-        ]
-        
         summary = {
-            'total_value': float(current_month_data['Omzet'].sum()),
+            'total_value': float(self.sheet_data['Omzet'].sum()),
             'trainings': {},
             'by_type': {},
-            'period': f"1-{current_date.month}-{current_date.year} to {current_date.strftime('%d-%m-%Y')}"
+            'period': "Alle data"
         }
         
-        # Group by training (for current month only)
-        training_groups = current_month_data.groupby('Training')
+        # Group by training
+        training_groups = self.sheet_data.groupby('Training')
         for training, group in training_groups:
             summary['trainings'][training] = {
                 'total_registrations': len(group),
                 'registration_date': group['Datum Inschrijving'].iloc[0].strftime('%d-%m-%Y'),
-                'value': float(group['Omzet'].sum())  # Sum for the month
+                'value': float(group['Omzet'].sum())
             }
         
-        # Group by Type (for current month only)
-        type_groups = current_month_data.groupby('Type')
+        # Group by Type
+        type_groups = self.sheet_data.groupby('Type')
         for type_name, group in type_groups:
             summary['by_type'][type_name] = {
                 'total_revenue': float(group['Omzet'].sum()),
@@ -199,12 +198,11 @@ class SheetsAgent:
                     "content": (
                         f"Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
                         f"Je spreekt alleen over deze data, en je praat niet over onrelevante dingen. "
-                        f"De getoonde data is gefilterd voor de huidige maand. "
+                        f"De getoonde data bevat alle inschrijvingen. "
                         f"Hier is de samenvatting van alle beschikbare data:\n\n{context}\n"
                         f"Geef specifieke, data-gedreven antwoorden gebaseerd op deze informatie. "
                         f"Bij vragen over omzet, toon bij voorkeur de verdeling per Type. "
                         f"Bij het bespreken van datums, gebruik de huidige datum ({current_date.strftime('%d-%m-%Y')}) als referentie. "
-                        f"Alle getoonde waardes zijn voor de huidige maand tenzij anders aangegeven. "
                         f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
                         f"Geef je antwoord in het Nederlands."
                     )
@@ -222,12 +220,6 @@ class SheetsAgent:
             
             return response.choices[0].message.content
             
-        except OpenAIError as e:
-            logger.error(f"OpenAI API error: {str(e)}")
-            raise HTTPException(
-                status_code=503,
-                detail="Er is een probleem met de AI service. Probeer het later opnieuw."
-            )
         except Exception as e:
             logger.error(f"Unexpected error in query_data: {str(e)}")
             raise 
