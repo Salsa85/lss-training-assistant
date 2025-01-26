@@ -21,3 +21,7 @@ ENV/
 
 # Logs
 *.log 
+
+# Add Railway specific files
+.railway/
+railway.json 
