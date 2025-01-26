@@ -20,10 +20,20 @@ def main():
         
         print("\n=== LSS Training Assistent ===")
         print("Type 'stop' om te stoppen")
-        print("Voorbeeldvragen:")
-        print("- Wat is de totale omzet van alle trainingen?")
-        print("- Welke training heeft de meeste inschrijvingen?")
-        print("- Toon de inschrijvingen van deze maand")
+        print("\nVoorbeeldvragen:")
+        print("1. Periode-specifieke vragen:")
+        print("   - Wat was de omzet in januari 2024?")
+        print("   - Hoeveel trainingen zijn er verkocht in 2023?")
+        print("   - Wat is de omzet van deze maand?")
+        
+        print("\n2. Type-specifieke vragen:")
+        print("   - Hoeveel Green Belt trainingen zijn er verkocht in december?")
+        print("   - Wat is de verdeling van training types dit jaar?")
+        
+        print("\n3. Vergelijkingen en trends:")
+        print("   - Wat is het verschil in omzet tussen november en december 2024?")
+        print("   - Hoe verhoudt de omzet van dit jaar zich tot vorig jaar?")
+        print("   - Welk type training presteert het beste dit jaar?")
         
         while True:
             user_query = input("\nWat wil je weten over de trainingen? > ").strip()
