@@ -39,6 +39,10 @@ class SheetsAgent:
         self.sheet_service = self._get_sheets_service()
         self.sheet_data = None
         
+        # Add conversation history
+        self.conversation_history = []
+        self.max_history = 5  # Aantal berichten om te onthouden
+        
     def _get_sheets_service(self):
         # For Railway deployment
         if os.getenv('RAILWAY_ENVIRONMENT'):
@@ -243,45 +247,24 @@ class SheetsAgent:
             # Get current date
             current_date = pd.Timestamp.now()
             
-            # Create context with structured information
-            context = f"Huidige Datum: {current_date.strftime('%d-%m-%Y')}\n"
-            context += f"Getoonde periode: {summary['period']}\n\n"
-            context += "Analyse van Inschrijvingen:\n\n"
-            context += f"Totale Omzet deze Maand: €{summary['total_value']:,.2f}\n\n"
+            # Create context
+            context = self._create_context(summary, current_date)
             
-            # Add type-based revenue information
-            context += "Omzet per Type (Deze Maand):\n"
-            for type_name, data in summary['by_type'].items():
-                context += f"\n{type_name}:\n"
-                context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
-                context += f"- Aantal Inschrijvingen: {data['total_registrations']}\n"
-            
-            context += "\nTraining Details (Deze Maand):\n"
-            for training, data in summary['trainings'].items():
-                context += f"\n{training}:\n"
-                context += f"- Inschrijvingen: {data['total_registrations']}\n"
-                context += f"- Inschrijfdatum: {data['registration_date']}\n"
-                context += f"- Waarde: €{data['value']:,.2f}\n"
-            
-            # Create the prompt for OpenAI
+            # Create messages array with system prompt and conversation history
             messages = [
                 {
                     "role": "system", 
-                    "content": (
-                        f"Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
-                        f"Je spreekt alleen over deze data, en je praat niet over onrelevante dingen. "
-                        f"De getoonde data bevat alle inschrijvingen. "
-                        f"Hier is de samenvatting van alle beschikbare data:\n\n{context}\n"
-                        f"Geef specifieke, data-gedreven antwoorden gebaseerd op deze informatie. "
-                        f"Bij vragen over omzet, toon bij voorkeur de verdeling per Type. "
-                        f"Bij het bespreken van datums, gebruik de huidige datum ({current_date.strftime('%d-%m-%Y')}) als referentie. "
-                        f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
-                        f"Geef je antwoord in het Nederlands."
-                    )
-                },
-                {"role": "user", "content": user_query}
+                    "content": self._create_system_prompt(context, current_date)
+                }
             ]
             
+            # Add conversation history
+            messages.extend(self.conversation_history[-self.max_history:])
+            
+            # Add current query
+            messages.append({"role": "user", "content": user_query})
+            
+            # Get response from OpenAI
             response = self.client.chat.completions.create(
                 model="gpt-4-turbo-preview",
                 messages=messages,
@@ -290,8 +273,50 @@ class SheetsAgent:
                 timeout=30
             )
             
+            # Store the conversation
+            self.conversation_history.append({"role": "user", "content": user_query})
+            self.conversation_history.append({"role": "assistant", "content": response.choices[0].message.content})
+            
             return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Unexpected error in query_data: {str(e)}")
             raise 
+
+    def _create_context(self, summary, current_date):
+        """Create context string from summary data"""
+        context = f"Huidige Datum: {current_date.strftime('%d-%m-%Y')}\n"
+        context += f"Getoonde periode: {summary['period']}\n\n"
+        context += "Analyse van Inschrijvingen:\n\n"
+        context += f"Totale Omzet deze Maand: €{summary['total_value']:,.2f}\n\n"
+        
+        # Add type-based revenue information
+        context += "Omzet per Type (Deze Maand):\n"
+        for type_name, data in summary['by_type'].items():
+            context += f"\n{type_name}:\n"
+            context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
+            context += f"- Aantal Inschrijvingen: {data['total_registrations']}\n"
+        
+        context += "\nTraining Details (Deze Maand):\n"
+        for training, data in summary['trainings'].items():
+            context += f"\n{training}:\n"
+            context += f"- Inschrijvingen: {data['total_registrations']}\n"
+            context += f"- Inschrijfdatum: {data['registration_date']}\n"
+            context += f"- Waarde: €{data['value']:,.2f}\n"
+        
+        return context
+        
+    def _create_system_prompt(self, context, current_date):
+        """Create system prompt with context"""
+        return (
+            f"Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
+            f"Je spreekt alleen over deze data, en je praat niet over onrelevante dingen. "
+            f"Je onthoudt eerdere vragen en antwoorden om een coherent gesprek te voeren. "
+            f"De getoonde data bevat alle inschrijvingen. "
+            f"Hier is de samenvatting van alle beschikbare data:\n\n{context}\n"
+            f"Geef specifieke, data-gedreven antwoorden gebaseerd op deze informatie. "
+            f"Bij vragen over omzet, toon bij voorkeur de verdeling per Type. "
+            f"Bij het bespreken van datums, gebruik de huidige datum ({current_date.strftime('%d-%m-%Y')}) als referentie. "
+            f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
+            f"Geef je antwoord in het Nederlands."
+        ) 
