@@ -1,7 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 from .sheets_agent import SheetsAgent
 from .config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
@@ -23,12 +21,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-app.add_middleware(HTTPSRedirectMiddleware)
-app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=["yourdomain.com"]
 )
 
 # Initialize agent with error handling
@@ -59,7 +51,8 @@ class Query(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "API is running"}
+    """Basic health check endpoint"""
+    return {"status": "ok"}
 
 @app.post("/vraag")
 async def stel_vraag(query: Query):
