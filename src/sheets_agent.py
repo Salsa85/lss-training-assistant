@@ -35,9 +35,7 @@ class SheetsAgent:
             if not openai_key:
                 raise ValueError("OPENAI_API_KEY not found in environment variables")
             self.client = OpenAI(
-                api_key=openai_key,
-                timeout=30.0,
-                max_retries=3
+                api_key=openai_key
             )
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {str(e)}")
