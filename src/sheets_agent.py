@@ -154,6 +154,10 @@ class SheetsAgent:
         year_match = re.search(r'20\d{2}', query)
         year = int(year_match.group()) if year_match else None
         
+        # Validate year is not in future
+        if year and year > current_date.year:
+            raise ValueError(f"Kan geen data tonen voor het jaar {year} omdat dit in de toekomst ligt.")
+        
         # Check for specific month mentions
         months = {
             'januari': 1, 'februari': 2, 'maart': 3, 'april': 4, 'mei': 5, 'juni': 6,
@@ -170,6 +174,13 @@ class SheetsAgent:
         # Check for month + year combinations
         for month_name, month_num in months.items():
             if month_name in query:
+                # Validate month/year combination is not in future
+                if year:
+                    future_date = pd.Timestamp(year=year, month=month_num, day=1)
+                    if future_date > current_date:
+                        raise ValueError(
+                            f"Kan geen data tonen voor {month_name} {year} omdat deze periode in de toekomst ligt."
+                        )
                 return {
                     'type': 'specific_month',
                     'year': year if year else current_date.year,
