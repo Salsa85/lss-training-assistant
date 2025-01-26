@@ -1,0 +1,10 @@
+ai-sheets-project/
+├── .env
+├── .gitignore
+├── requirements.txt
+├── credentials/
+│   └── .gitkeep
+├── src/
+│   ├── __init__.py
+│   ├── sheets_agent.py
+│   └── config.py 
