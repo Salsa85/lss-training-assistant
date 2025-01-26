@@ -318,16 +318,29 @@ class SheetsAgent:
         context = f"Huidige Datum: {current_date.strftime('%d-%m-%Y')}\n"
         context += f"Getoonde periode: {summary['period']}\n\n"
         context += "Analyse van Inschrijvingen:\n\n"
-        context += f"Totale Omzet deze Maand: €{summary['total_value']:,.2f}\n\n"
         
-        # Add type-based revenue information
-        context += "Omzet per Type (Deze Maand):\n"
+        # Totale omzet voor de periode
+        context += f"Totale Omzet: €{summary['total_value']:,.2f}\n"
+        
+        # Voeg trend informatie toe
+        if 'trends' in summary and summary['trends'].get('total_change_percentage', 0) != 0:
+            context += f"Verschil met vorige periode: {summary['trends']['total_change_percentage']:.1f}%\n"
+        
+        # Omzet per type voor de periode
+        context += "\nOmzet per Type:\n"
         for type_name, data in summary['by_type'].items():
             context += f"\n{type_name}:\n"
             context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
             context += f"- Aantal Inschrijvingen: {data['total_registrations']}\n"
+            
+            # Voeg trend informatie per type toe
+            if 'trends' in summary and type_name in summary['trends']['by_type']:
+                trend = summary['trends']['by_type'][type_name]
+                if trend['previous_value'] > 0:
+                    context += f"- Verschil met vorige periode: {trend['change_percentage']:.1f}%\n"
         
-        context += "\nTraining Details (Deze Maand):\n"
+        # Training details
+        context += "\nTraining Details:\n"
         for training, data in summary['trainings'].items():
             context += f"\n{training}:\n"
             context += f"- Inschrijvingen: {data['total_registrations']}\n"
