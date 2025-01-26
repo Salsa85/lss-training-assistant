@@ -73,49 +73,64 @@ class SheetsAgent:
     
     def load_sheet_data(self, range_name):
         """Load data from specified range in Google Sheet"""
-        # Specify the exact columns we want
-        result = self.sheet_service.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id, 
-            range=range_name,
-            valueRenderOption='FORMATTED_VALUE'
-        ).execute()
-        
-        values = result.get('values', [])
-        if not values:
-            raise ValueError('No data found in sheet')
-        
-        # Get all data first
-        df = pd.DataFrame(values[1:], columns=values[0])
-        
-        # Only keep the columns we need
-        required_columns = ['Datum Inschrijving', 'Training', 'Omzet', 'Type']
-        df = df[required_columns]
-        
-        # Clean up training names by removing dates
-        df['Training'] = df['Training'].apply(lambda x: self._clean_training_name(str(x)))
-        
-        # Convert date column to datetime
-        def standardize_date(date_str):
-            try:
-                if not isinstance(date_str, str):
-                    date_str = str(date_str)
-                date_obj = pd.to_datetime(date_str, format='%d-%m-%Y')
-                return date_obj.strftime('%d-%m-%Y')
-            except:
-                return str(date_str)
+        try:
+            # Fetch data from Google Sheets
+            result = self.sheet_service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id, 
+                range=range_name,
+                valueRenderOption='FORMATTED_VALUE'
+            ).execute()
+            
+            values = result.get('values', [])
+            if not values:
+                raise ValueError('No data found in sheet')
+            
+            # Create DataFrame
+            df = pd.DataFrame(values[1:], columns=values[0])
+            
+            # Only keep required columns
+            required_columns = ['Datum Inschrijving', 'Training', 'Omzet', 'Type']
+            df = df[required_columns]
+            
+            # Clean up training names
+            df['Training'] = df['Training'].apply(lambda x: self._clean_training_name(str(x)))
+            
+            # Convert date strings to datetime
+            df['Datum Inschrijving'] = pd.to_datetime(
+                df['Datum Inschrijving'].apply(self._standardize_date), 
+                format='%d-%m-%Y'
+            )
+            
+            # Convert Omzet to float, removing € and . characters
+            df['Omzet'] = df['Omzet'].replace('[\€\.]', '', regex=True).str.replace(',', '.').astype(float)
+            
+            # Sort by date
+            df = df.sort_values('Datum Inschrijving')
+            
+            # Store the data
+            self.sheet_data = df
+            
+            logger.info(f"Loaded {len(df)} rows of data from {df['Datum Inschrijving'].min()} to {df['Datum Inschrijving'].max()}")
+            
+            return self.sheet_data
+            
+        except Exception as e:
+            logger.error(f"Error loading sheet data: {str(e)}")
+            raise
 
-        df['Datum Inschrijving'] = df['Datum Inschrijving'].apply(standardize_date)
-        df['Datum Inschrijving'] = pd.to_datetime(
-            df['Datum Inschrijving'], 
-            format='%d-%m-%Y',
-            errors='coerce'
-        )
-        
-        # Convert Omzet column to numeric
-        df['Omzet'] = df['Omzet'].astype(str).replace('[\€,]', '', regex=True).astype(float)
-        
-        self.sheet_data = df
-        return self.sheet_data
+    def _standardize_date(self, date_str):
+        """Standardize date format"""
+        try:
+            if not isinstance(date_str, str):
+                date_str = str(date_str)
+            # Remove any leading/trailing whitespace
+            date_str = date_str.strip()
+            # Parse the date
+            date_obj = pd.to_datetime(date_str, format='%d-%m-%Y')
+            return date_obj.strftime('%d-%m-%Y')
+        except:
+            logger.warning(f"Could not parse date: {date_str}")
+            return date_str
     
     def _clean_training_name(self, training_name):
         """Remove dates and clean up training names"""
