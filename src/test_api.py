@@ -6,37 +6,27 @@ from requests.exceptions import RequestException
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_URL = "http://localhost:8000"
+# Update deze URL met je Railway URL
+BASE_URL = "https://lss-training-assistant-production.up.railway.app"
 
 def test_api():
     try:
-        # Test root endpoint
-        logger.info("Testing root endpoint...")
-        response = requests.get(f"{BASE_URL}/")
+        # Test health endpoint
+        logger.info("Testing health endpoint...")
+        response = requests.get(f"{BASE_URL}/health")
         response.raise_for_status()
-        print("Root endpoint response:", response.json())
-
-        # Test ververs endpoint
-        logger.info("Testing ververs endpoint...")
-        response = requests.get(f"{BASE_URL}/ververs")
-        response.raise_for_status()
-        print("\nVervers response:", response.json())
+        print("Health check response:", response.json())
 
         # Test vraag endpoint
         logger.info("Testing vraag endpoint...")
-        vragen = [
-            "Wat is de totale omzet deze maand?"
-        ]
-        
-        for vraag in vragen:
-            logger.info(f"Testing question: {vraag}")
-            response = requests.post(
-                f"{BASE_URL}/vraag",
-                json={"vraag": vraag}
-            )
-            response.raise_for_status()
-            print(f"\nVraag: {vraag}")
-            print("Response:", response.json())
+        test_vraag = "Wat is de totale omzet deze maand?"
+        response = requests.post(
+            f"{BASE_URL}/vraag",
+            json={"vraag": test_vraag}
+        )
+        response.raise_for_status()
+        print("\nVraag:", test_vraag)
+        print("Response:", response.json())
 
     except RequestException as e:
         logger.error(f"Network error: {str(e)}")
