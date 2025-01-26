@@ -135,21 +135,29 @@ class SheetsAgent:
         query = query.lower()
         current_date = pd.Timestamp.now()
         
+        # Check for year mentions
+        year_match = re.search(r'20\d{2}', query)
+        year = int(year_match.group()) if year_match else None
+        
         # Check for specific month mentions
         months = {
             'januari': 1, 'februari': 2, 'maart': 3, 'april': 4, 'mei': 5, 'juni': 6,
             'juli': 7, 'augustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'december': 12
         }
         
+        # Check for year only queries
+        if year and not any(month in query for month in months):
+            return {
+                'type': 'year',
+                'year': year
+            }
+        
+        # Check for month + year combinations
         for month_name, month_num in months.items():
             if month_name in query:
-                # Check for year mention
-                year_match = re.search(r'20\d{2}', query)
-                year = int(year_match.group()) if year_match else current_date.year
-                
                 return {
                     'type': 'specific_month',
-                    'year': year,
+                    'year': year if year else current_date.year,
                     'month': month_num
                 }
         
@@ -158,6 +166,10 @@ class SheetsAgent:
             return {'type': 'previous_month'}
         elif 'deze maand' in query:
             return {'type': 'current_month'}
+        elif 'dit jaar' in query:
+            return {'type': 'current_year'}
+        elif 'vorig jaar' in query:
+            return {'type': 'previous_year'}
         
         return {'type': 'all_time'}
 
@@ -174,6 +186,10 @@ class SheetsAgent:
                     (filtered_data['Datum Inschrijving'].dt.month == period['month']) &
                     (filtered_data['Datum Inschrijving'].dt.year == period['year'])
                 ]
+            elif period['type'] == 'year':
+                filtered_data = filtered_data[
+                    filtered_data['Datum Inschrijving'].dt.year == period['year']
+                ]
             elif period['type'] == 'current_month':
                 current_date = pd.Timestamp.now()
                 filtered_data = filtered_data[
@@ -187,12 +203,26 @@ class SheetsAgent:
                     filtered_data['Datum Inschrijving'].dt.to_period('M') == 
                     previous_month.to_period('M')
                 ]
+            elif period['type'] == 'current_year':
+                current_year = pd.Timestamp.now().year
+                filtered_data = filtered_data[
+                    filtered_data['Datum Inschrijving'].dt.year == current_year
+                ]
+            elif period['type'] == 'previous_year':
+                previous_year = pd.Timestamp.now().year - 1
+                filtered_data = filtered_data[
+                    filtered_data['Datum Inschrijving'].dt.year == previous_year
+                ]
+        
+        # Calculate percentages and trends
+        previous_period_data = self._get_previous_period_data(period)
         
         summary = {
             'total_value': float(filtered_data['Omzet'].sum()),
             'trainings': {},
             'by_type': {},
-            'period': self._get_period_description(period)
+            'period': self._get_period_description(period),
+            'trends': self._calculate_trends(filtered_data, previous_period_data)
         }
         
         # Group by training
@@ -310,13 +340,42 @@ class SheetsAgent:
         """Create system prompt with context"""
         return (
             f"Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
-            f"Je spreekt alleen over deze data, en je praat niet over onrelevante dingen. "
-            f"Je onthoudt eerdere vragen en antwoorden om een coherent gesprek te voeren. "
+            f"Je kunt de volgende soorten analyses uitvoeren:\n"
+            f"1. Omzet per maand of jaar\n"
+            f"2. Vergelijkingen tussen periodes (percentages)\n"
+            f"3. Overzichten van verkochte trainingen per type\n"
+            f"4. Trends en ontwikkelingen\n\n"
             f"De getoonde data bevat alle inschrijvingen. "
-            f"Hier is de samenvatting van alle beschikbare data:\n\n{context}\n"
-            f"Geef specifieke, data-gedreven antwoorden gebaseerd op deze informatie. "
-            f"Bij vragen over omzet, toon bij voorkeur de verdeling per Type. "
-            f"Bij het bespreken van datums, gebruik de huidige datum ({current_date.strftime('%d-%m-%Y')}) als referentie. "
+            f"Hier is de samenvatting van de gevraagde periode:\n\n{context}\n"
+            f"Geef specifieke, data-gedreven antwoorden met waar mogelijk percentages en vergelijkingen. "
             f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
+            f"Als er om vergelijkingen wordt gevraagd, toon dan de verschillen in percentages. "
             f"Geef je antwoord in het Nederlands."
         ) 
+
+    def _calculate_trends(self, current_data, previous_data):
+        """Calculate trends and percentages between periods"""
+        current_total = float(current_data['Omzet'].sum())
+        previous_total = float(previous_data['Omzet'].sum() if previous_data is not None else 0)
+        
+        trends = {
+            'total_change_percentage': ((current_total - previous_total) / previous_total * 100) 
+                if previous_total > 0 else 0,
+            'by_type': {}
+        }
+        
+        # Calculate changes per type
+        current_by_type = current_data.groupby('Type')['Omzet'].sum()
+        if previous_data is not None:
+            previous_by_type = previous_data.groupby('Type')['Omzet'].sum()
+            for type_name in current_by_type.index:
+                current_value = float(current_by_type.get(type_name, 0))
+                previous_value = float(previous_by_type.get(type_name, 0))
+                trends['by_type'][type_name] = {
+                    'current_value': current_value,
+                    'previous_value': previous_value,
+                    'change_percentage': ((current_value - previous_value) / previous_value * 100)
+                        if previous_value > 0 else 0
+                }
+        
+        return trends 
