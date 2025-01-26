@@ -126,20 +126,73 @@ class SheetsAgent:
         
         return training_name.strip()
     
-    def get_training_summary(self):
+    def _parse_query_period(self, query):
+        """Parse the query to determine the period to analyze"""
+        query = query.lower()
+        current_date = pd.Timestamp.now()
+        
+        # Check for specific month mentions
+        months = {
+            'januari': 1, 'februari': 2, 'maart': 3, 'april': 4, 'mei': 5, 'juni': 6,
+            'juli': 7, 'augustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'december': 12
+        }
+        
+        for month_name, month_num in months.items():
+            if month_name in query:
+                # Check for year mention
+                year_match = re.search(r'20\d{2}', query)
+                year = int(year_match.group()) if year_match else current_date.year
+                
+                return {
+                    'type': 'specific_month',
+                    'year': year,
+                    'month': month_num
+                }
+        
+        # Check for relative periods
+        if 'vorige maand' in query:
+            return {'type': 'previous_month'}
+        elif 'deze maand' in query:
+            return {'type': 'current_month'}
+        
+        return {'type': 'all_time'}
+
+    def get_training_summary(self, period=None):
         """Get summary of trainings, their dates, and values"""
         if self.sheet_data is None:
             raise ValueError('Sheet data not loaded. Call load_sheet_data first.')
         
+        filtered_data = self.sheet_data.copy()
+        
+        if isinstance(period, dict):
+            if period['type'] == 'specific_month':
+                filtered_data = filtered_data[
+                    (filtered_data['Datum Inschrijving'].dt.month == period['month']) &
+                    (filtered_data['Datum Inschrijving'].dt.year == period['year'])
+                ]
+            elif period['type'] == 'current_month':
+                current_date = pd.Timestamp.now()
+                filtered_data = filtered_data[
+                    filtered_data['Datum Inschrijving'].dt.to_period('M') == 
+                    current_date.to_period('M')
+                ]
+            elif period['type'] == 'previous_month':
+                current_date = pd.Timestamp.now()
+                previous_month = (current_date - pd.DateOffset(months=1))
+                filtered_data = filtered_data[
+                    filtered_data['Datum Inschrijving'].dt.to_period('M') == 
+                    previous_month.to_period('M')
+                ]
+        
         summary = {
-            'total_value': float(self.sheet_data['Omzet'].sum()),
+            'total_value': float(filtered_data['Omzet'].sum()),
             'trainings': {},
             'by_type': {},
-            'period': "Alle data"
+            'period': self._get_period_description(period)
         }
         
         # Group by training
-        training_groups = self.sheet_data.groupby('Training')
+        training_groups = filtered_data.groupby('Training')
         for training, group in training_groups:
             summary['trainings'][training] = {
                 'total_registrations': len(group),
@@ -148,7 +201,7 @@ class SheetsAgent:
             }
         
         # Group by Type
-        type_groups = self.sheet_data.groupby('Type')
+        type_groups = filtered_data.groupby('Type')
         for type_name, group in type_groups:
             summary['by_type'][type_name] = {
                 'total_revenue': float(group['Omzet'].sum()),
@@ -156,6 +209,22 @@ class SheetsAgent:
             }
         
         return summary
+
+    def _get_period_description(self, period):
+        """Get description for the selected period"""
+        if isinstance(period, dict):
+            if period['type'] == 'specific_month':
+                months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+                         'juli', 'augustus', 'september', 'oktober', 'november', 'december']
+                month_name = months[period['month'] - 1]
+                return f"{month_name} {period['year']}"
+            elif period['type'] == 'current_month':
+                current_date = pd.Timestamp.now()
+                return f"1-{current_date.month}-{current_date.year} tot {current_date.strftime('%d-%m-%Y')}"
+            elif period['type'] == 'previous_month':
+                previous_month = (pd.Timestamp.now() - pd.DateOffset(months=1))
+                return f"1-{previous_month.month}-{previous_month.year} tot {previous_month.strftime('%d-%m-%Y')}"
+        return "Alle data"
     
     @sleep_and_retry
     @limits(calls=MAX_REQUESTS_PER_MINUTE, period=ONE_MINUTE)
@@ -165,11 +234,14 @@ class SheetsAgent:
             if self.sheet_data is None:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
+            # Parse period from query
+            period = self._parse_query_period(user_query)
+            
+            # Get summary data for the specified period
+            summary = self.get_training_summary(period)
+            
             # Get current date
             current_date = pd.Timestamp.now()
-            
-            # Get summary data
-            summary = self.get_training_summary()
             
             # Create context with structured information
             context = f"Huidige Datum: {current_date.strftime('%d-%m-%Y')}\n"
