@@ -3,4 +3,4 @@ builder = "nixpacks"
 buildCommand = "pip install -r requirements.txt"
 
 [deploy]
-startCommand = "python -c \"import os; from uvicorn import run; run('src.api:app', host='0.0.0.0', port=int(os.environ.get('PORT', '8000')), app_dir='/app')\"" 
+startCommand = "python -c \"import os; from uvicorn import run; run('src.api:app', host='0.0.0.0', port=int(os.environ.get('PORT', '8000')))\"" 

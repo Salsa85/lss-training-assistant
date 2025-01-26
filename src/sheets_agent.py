@@ -27,6 +27,7 @@ MAX_REQUESTS_PER_MINUTE = 50  # Aanpassen aan je OpenAI limiet
 class SheetsAgent:
     def __init__(self, credentials_file, spreadsheet_id):
         self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+        self.credentials_file = credentials_file  # Nodig voor lokale ontwikkeling
         self.spreadsheet_id = spreadsheet_id
         
         # Initialize OpenAI
