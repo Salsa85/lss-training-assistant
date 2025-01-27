@@ -14,6 +14,7 @@ import logging
 from ratelimit import limits, sleep_and_retry
 import json
 import io
+import urllib.parse
 
 # Setup logging
 logging.basicConfig(
@@ -371,16 +372,16 @@ class SheetsAgent:
                 if os.getenv('RAILWAY_ENVIRONMENT'):
                     base_url = "https://lss-training-assistant-production.up.railway.app"
                 
-                export_url = f"{base_url}/export"
+                # Create encoded query for direct download
+                encoded_query = urllib.parse.quote(user_query)
+                download_url = f"{base_url}/export?query={encoded_query}"
                 
                 # Create response with download instructies
                 response = (
                     f"Ik heb een export voorbereid met de gevraagde data.\n\n"
-                    f"Je kunt de data downloaden via deze link:\n"
-                    f"{export_url}\n\n"
-                    f"Stuur een POST request naar bovenstaande URL met deze JSON body:\n"
-                    f'{{"query": "{user_query}"}}\n\n'
-                    f"Of gebruik de 'Exporteer Data' knop in de Streamlit interface."
+                    f"Je kunt de data direct downloaden via deze link:\n"
+                    f"{download_url}\n\n"
+                    f"Of gebruik de 'Exporteer Data' knop in de Streamlit interface voor meer opties."
                 )
                 
                 return response

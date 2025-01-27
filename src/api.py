@@ -87,17 +87,23 @@ async def health_check():
         "version": "1.0.0"
     }
 
+@app.get("/export")
 @app.post("/export")
-async def export_data(query: ExportQuery):
+async def export_data(query: str = None, query_body: ExportQuery = None):
     """Export data to CSV based on query"""
     try:
+        # Get query from either query parameter or body
+        export_query = query or (query_body.query if query_body else None)
+        if not export_query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
         # Parse period and company from query
-        period = agent._parse_query_period(query.query)
+        period = agent._parse_query_period(export_query)
         company_filter = None
         
         # Simple company detection
         for company in agent.sheet_data['Bedrijf'].unique():
-            if company.lower() in query.query.lower():
+            if company.lower() in export_query.lower():
                 company_filter = company
                 break
         
