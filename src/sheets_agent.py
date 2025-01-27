@@ -354,6 +354,37 @@ class SheetsAgent:
             if self.sheet_data is None:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
+            # Check if this is an export request
+            if user_query.lower().startswith('exporteer'):
+                # Parse period and company from query
+                period = self._parse_query_period(user_query)
+                company_filter = None
+                
+                # Simple company detection
+                for company in self.sheet_data['Bedrijf'].unique():
+                    if company.lower() in user_query.lower():
+                        company_filter = company
+                        break
+                
+                # Generate export URL
+                base_url = "http://localhost:8000"  # Voor lokaal testen
+                if os.getenv('RAILWAY_ENVIRONMENT'):
+                    base_url = "https://lss-training-assistant-production.up.railway.app"
+                
+                export_url = f"{base_url}/export"
+                
+                # Create response with download instructies
+                response = (
+                    f"Ik heb een export voorbereid met de gevraagde data.\n\n"
+                    f"Je kunt de data downloaden via deze link:\n"
+                    f"{export_url}\n\n"
+                    f"Stuur een POST request naar bovenstaande URL met deze JSON body:\n"
+                    f'{{"query": "{user_query}"}}\n\n'
+                    f"Of gebruik de 'Exporteer Data' knop in de Streamlit interface."
+                )
+                
+                return response
+            
             # Parse period from query
             period = self._parse_query_period(user_query)
             
@@ -452,13 +483,15 @@ class SheetsAgent:
             f"2. Vergelijkingen tussen periodes (percentages)\n"
             f"3. Overzichten van verkochte trainingen per type\n"
             f"4. Analyses per bedrijf (inschrijvingen en trainingen)\n"
-            f"5. Trends en ontwikkelingen\n\n"
+            f"5. Trends en ontwikkelingen\n"
+            f"6. Data exports naar CSV\n\n"
             f"De getoonde data bevat alle inschrijvingen. "
             f"Hier is de samenvatting van de gevraagde periode:\n\n{context}\n"
             f"Geef specifieke, data-gedreven antwoorden met waar mogelijk percentages en vergelijkingen. "
             f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
             f"Als er om vergelijkingen wordt gevraagd, toon dan de verschillen in percentages. "
             f"Bij vragen over bedrijven, wees flexibel met bedrijfsnamen (bv. 'ING' matcht ook 'ING Bank'). "
+            f"Bij export verzoeken, geef duidelijke download instructies. "
             f"Geef je antwoord in het Nederlands."
         ) 
 
