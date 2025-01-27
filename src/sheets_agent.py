@@ -379,8 +379,7 @@ class SheetsAgent:
                 # Create response with download instructies
                 response = (
                     f"Ik heb een export voorbereid met de gevraagde data.\n\n"
-                    f"Je kunt de data direct downloaden via deze link:\n"
-                    f"{download_url}\n\n"
+                    f"[Download CSV]({download_url})\n\n"
                     f"Of gebruik de 'Exporteer Data' knop in de Streamlit interface voor meer opties."
                 )
                 
