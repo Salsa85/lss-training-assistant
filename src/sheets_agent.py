@@ -45,6 +45,22 @@ class SheetsAgent:
         self.conversation_history = []
         self.max_history = 5  # Aantal berichten om te onthouden
         
+        # Define system prompt
+        self.system_prompt = (
+            "Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
+            "Je kunt de volgende soorten analyses uitvoeren:\n"
+            "1. Omzet per maand of jaar\n"
+            "2. Vergelijkingen tussen periodes (percentages)\n"
+            "3. Overzichten van verkochte trainingen per type\n"
+            "4. Analyses per bedrijf (inschrijvingen en trainingen)\n"
+            "5. Trends en ontwikkelingen\n\n"
+            "Geef specifieke, data-gedreven antwoorden met waar mogelijk percentages en vergelijkingen. "
+            "Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
+            "Als er om vergelijkingen wordt gevraagd, toon dan de verschillen in percentages. "
+            "Bij vragen over bedrijven, wees flexibel met bedrijfsnamen (bv. 'ING' matcht ook 'ING Bank'). "
+            "Geef je antwoord in het Nederlands."
+        )
+        
     def _get_sheets_service(self):
         # For Railway deployment
         if os.getenv('RAILWAY_ENVIRONMENT'):
@@ -355,80 +371,30 @@ class SheetsAgent:
             if self.sheet_data is None:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
-            # Check if this is an export request
-            if user_query.lower().startswith('exporteer'):
-                # Parse period and company from query
-                period = self._parse_query_period(user_query)
-                company_filter = None
-                
-                # Simple company detection
-                for company in self.sheet_data['Bedrijf'].unique():
-                    if company.lower() in user_query.lower():
-                        company_filter = company
-                        break
-                
-                # Generate export URL
-                base_url = "http://localhost:8000"  # Voor lokaal testen
-                if os.getenv('RAILWAY_ENVIRONMENT'):
-                    base_url = "https://lss-training-assistant-production.up.railway.app"
-                
-                # Create encoded query for direct download
-                encoded_query = urllib.parse.quote(user_query)
-                download_url = f"{base_url}/export?query={encoded_query}"
-                
-                # Create response with download instructies
-                response = (
-                    f"Ik heb een export voorbereid met de gevraagde data.\n\n"
-                    f"[Download CSV]({download_url})\n\n"
-                    f"Of gebruik de 'Exporteer Data' knop in de Streamlit interface voor meer opties."
-                )
-                
-                return response
-            
-            # Parse period from query
+            # Parse period from query first
             period = self._parse_query_period(user_query)
             
-            # Get summary data for the specified period
+            # Get summary based on period
             summary = self.get_training_summary(period)
             
-            # Get current date
-            current_date = pd.Timestamp.now()
-            
             # Create context
-            context = self._create_context(summary, current_date)
+            context = self._create_context(summary, pd.Timestamp.now())
             
-            # Create messages array with system prompt and conversation history
             messages = [
-                {
-                    "role": "system", 
-                    "content": self._create_system_prompt(context, current_date)
-                }
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": f"Context:\n{context}\n\nVraag: {user_query}"}
             ]
             
-            # Add conversation history
-            messages.extend(self.conversation_history[-self.max_history:])
-            
-            # Add current query
-            messages.append({"role": "user", "content": user_query})
-            
-            # Get response from OpenAI
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4-turbo-preview",
                 messages=messages,
-                temperature=0.1,
-                max_tokens=500,
-                timeout=30
+                temperature=0,
             )
-            
-            # Store the conversation
-            self.conversation_history.append({"role": "user", "content": user_query})
-            self.conversation_history.append({"role": "assistant", "content": response.choices[0].message.content})
             
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"Unexpected error in query_data: {str(e)}")
-            raise 
+            raise Exception(f"Error querying OpenAI: {str(e)}")
 
     def _create_context(self, summary, current_date):
         """Create context string from summary data"""
@@ -634,3 +600,98 @@ class SheetsAgent:
         except Exception as e:
             logger.error(f"Error exporting to CSV: {str(e)}")
             raise 
+
+    def _filter_data(self, data, filters):
+        """Filter data based on multiple criteria"""
+        filtered_data = data.copy()
+        
+        # Filter by year
+        if 'year' in filters:
+            filtered_data = filtered_data[
+                filtered_data['Datum Inschrijving'].dt.year == filters['year']
+            ]
+        
+        # Filter by month
+        if 'month' in filters:
+            filtered_data = filtered_data[
+                filtered_data['Datum Inschrijving'].dt.month == filters['month']
+            ]
+        
+        # Filter by training type
+        if 'training_type' in filters:
+            type_query = filters['training_type'].lower()
+            filtered_data = filtered_data[
+                filtered_data['Type'].str.lower().str.contains(type_query)
+            ]
+        
+        # Filter by specific training
+        if 'training' in filters:
+            training_query = filters['training'].lower()
+            filtered_data = filtered_data[
+                filtered_data['Training'].str.lower().str.contains(training_query)
+            ]
+        
+        return filtered_data
+
+    def _parse_search_filters(self, query):
+        """Parse query to extract search filters"""
+        query = query.lower()
+        filters = {}
+        
+        # Extract year
+        year_match = re.search(r'20\d{2}', query)
+        if year_match:
+            filters['year'] = int(year_match.group())
+        
+        # Extract month
+        months = {
+            'januari': 1, 'februari': 2, 'maart': 3, 'april': 4,
+            'mei': 5, 'juni': 6, 'juli': 7, 'augustus': 8,
+            'september': 9, 'oktober': 10, 'november': 11, 'december': 12
+        }
+        for month_name, month_num in months.items():
+            if month_name in query:
+                filters['month'] = month_num
+                break
+        
+        # Extract training types
+        training_types = ['green belt', 'black belt', 'yellow belt', 'lean', 'six sigma']
+        for training_type in training_types:
+            if training_type in query:
+                filters['training_type'] = training_type
+                break
+        
+        # Handle relative periods
+        if 'deze maand' in query:
+            current_date = pd.Timestamp.now()
+            filters['year'] = current_date.year
+            filters['month'] = current_date.month
+        elif 'vorige maand' in query:
+            current_date = pd.Timestamp.now()
+            previous_date = current_date - pd.DateOffset(months=1)
+            filters['year'] = previous_date.year
+            filters['month'] = previous_date.month
+        elif 'dit jaar' in query:
+            filters['year'] = pd.Timestamp.now().year
+        elif 'vorig jaar' in query:
+            filters['year'] = pd.Timestamp.now().year - 1
+        
+        return filters
+
+    def _get_period_description_from_filters(self, filters):
+        """Create period description from filters"""
+        parts = []
+        
+        if 'month' in filters and 'year' in filters:
+            months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+                     'juli', 'augustus', 'september', 'oktober', 'november', 'december']
+            parts.append(f"{months[filters['month']-1]} {filters['year']}")
+        elif 'year' in filters:
+            parts.append(str(filters['year']))
+        
+        if 'training_type' in filters:
+            parts.append(filters['training_type'])
+        
+        if parts:
+            return ' - '.join(parts)
+        return "Alle data" 
