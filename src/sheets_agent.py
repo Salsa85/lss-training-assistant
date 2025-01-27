@@ -535,3 +535,57 @@ class SheetsAgent:
             return None
         
         return previous_data if not previous_data.empty else None 
+
+    def export_to_csv(self, filename=None, period=None, company_filter=None):
+        """Export data to CSV with optional period and company filters"""
+        try:
+            if self.sheet_data is None:
+                raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
+            
+            # Start with a copy of the data
+            export_data = self.sheet_data.copy()
+            
+            # Apply period filter if specified
+            if isinstance(period, dict):
+                if period['type'] == 'specific_month':
+                    export_data = export_data[
+                        (export_data['Datum Inschrijving'].dt.month == period['month']) &
+                        (export_data['Datum Inschrijving'].dt.year == period['year'])
+                    ]
+                elif period['type'] == 'year':
+                    export_data = export_data[
+                        export_data['Datum Inschrijving'].dt.year == period['year']
+                    ]
+                # ... andere period filters ...
+            
+            # Apply company filter if specified
+            if company_filter:
+                export_data = export_data[
+                    export_data['Bedrijf'].apply(
+                        lambda x: self._company_matches_query(x, company_filter)
+                    )
+                ]
+            
+            # Generate default filename if none provided
+            if filename is None:
+                current_date = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+                filename = f'training_export_{current_date}.csv'
+            
+            # Ensure filename has .csv extension
+            if not filename.endswith('.csv'):
+                filename += '.csv'
+            
+            # Format currency values
+            export_data['Omzet'] = export_data['Omzet'].apply(lambda x: f'€ {x:,.2f}')
+            
+            # Format date
+            export_data['Datum Inschrijving'] = export_data['Datum Inschrijving'].dt.strftime('%d-%m-%Y')
+            
+            # Export to CSV
+            export_data.to_csv(filename, index=False, sep=';', encoding='utf-8-sig')
+            
+            return filename
+        
+        except Exception as e:
+            logger.error(f"Error exporting to CSV: {str(e)}")
+            raise 
