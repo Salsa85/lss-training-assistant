@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from src.sheets_agent import SheetsAgent
 from src.config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
@@ -7,6 +8,7 @@ import logging
 from datetime import datetime
 from prometheus_client import Counter, Histogram
 import time
+import io
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -49,6 +51,9 @@ async def add_metrics(request, call_next):
 class Query(BaseModel):
     vraag: str
 
+class ExportQuery(BaseModel):
+    query: str
+
 @app.get("/")
 async def root():
     """Basic health check endpoint"""
@@ -80,4 +85,47 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "1.0.0"
-    } 
+    }
+
+@app.post("/export")
+async def export_data(query: ExportQuery):
+    """Export data to CSV based on query"""
+    try:
+        # Parse period and company from query
+        period = agent._parse_query_period(query.query)
+        company_filter = None
+        
+        # Simple company detection
+        for company in agent.sheet_data['Bedrijf'].unique():
+            if company.lower() in query.query.lower():
+                company_filter = company
+                break
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        agent.export_to_csv(
+            filename=output,
+            period=period,
+            company_filter=company_filter
+        )
+        
+        # Reset buffer position
+        output.seek(0)
+        
+        # Generate filename
+        current_date = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"training_export_{current_date}.csv"
+        
+        # Return streaming response
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Access-Control-Expose-Headers': 'Content-Disposition'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting data: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 

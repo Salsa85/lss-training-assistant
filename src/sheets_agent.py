@@ -13,6 +13,7 @@ import os
 import logging
 from ratelimit import limits, sleep_and_retry
 import json
+import io
 
 # Setup logging
 logging.basicConfig(
@@ -566,26 +567,37 @@ class SheetsAgent:
                     )
                 ]
             
-            # Generate default filename if none provided
-            if filename is None:
-                current_date = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
-                filename = f'training_export_{current_date}.csv'
+            # Format data...
             
-            # Ensure filename has .csv extension
-            if not filename.endswith('.csv'):
-                filename += '.csv'
+            # Handle both file and StringIO output
+            if isinstance(filename, io.StringIO):
+                # Write directly to StringIO
+                export_data.to_csv(
+                    filename,
+                    index=False,
+                    sep=';',
+                    encoding='utf-8-sig'
+                )
+                return filename
+            else:
+                # Generate default filename if none provided
+                if filename is None:
+                    current_date = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f'training_export_{current_date}.csv'
+                
+                # Ensure filename has .csv extension
+                if not filename.endswith('.csv'):
+                    filename += '.csv'
+                
+                # Export to file
+                export_data.to_csv(
+                    filename,
+                    index=False,
+                    sep=';',
+                    encoding='utf-8-sig'
+                )
+                return filename
             
-            # Format currency values
-            export_data['Omzet'] = export_data['Omzet'].apply(lambda x: f'€ {x:,.2f}')
-            
-            # Format date
-            export_data['Datum Inschrijving'] = export_data['Datum Inschrijving'].dt.strftime('%d-%m-%Y')
-            
-            # Export to CSV
-            export_data.to_csv(filename, index=False, sep=';', encoding='utf-8-sig')
-            
-            return filename
-        
         except Exception as e:
             logger.error(f"Error exporting to CSV: {str(e)}")
             raise 
