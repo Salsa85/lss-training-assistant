@@ -88,12 +88,15 @@ class SheetsAgent:
             # Create DataFrame
             df = pd.DataFrame(values[1:], columns=values[0])
             
-            # Only keep required columns
-            required_columns = ['Datum Inschrijving', 'Training', 'Omzet', 'Type']
+            # Update required columns to include Bedrijf
+            required_columns = ['Datum Inschrijving', 'Training', 'Omzet', 'Type', 'Bedrijf']
             df = df[required_columns]
             
             # Clean up training names
             df['Training'] = df['Training'].apply(lambda x: self._clean_training_name(str(x)))
+            
+            # Clean up company names
+            df['Bedrijf'] = df['Bedrijf'].apply(lambda x: self._clean_company_name(str(x)))
             
             # Convert date strings to datetime
             df['Datum Inschrijving'] = pd.to_datetime(
@@ -145,6 +148,44 @@ class SheetsAgent:
         
         return training_name.strip()
     
+    def _clean_company_name(self, company_name):
+        """Clean and standardize company names"""
+        if not isinstance(company_name, str):
+            company_name = str(company_name)
+        
+        # Basic cleaning
+        company_name = company_name.strip()
+        company_name = ' '.join(company_name.split())  # Normalize whitespace
+        
+        # Remove common legal suffixes
+        suffixes = [' bv', ' b.v.', ' nv', ' n.v.', ' inc', ' ltd']
+        for suffix in suffixes:
+            if company_name.lower().endswith(suffix):
+                company_name = company_name[:-len(suffix)]
+        
+        return company_name.strip()
+
+    def _company_matches_query(self, company_name, query):
+        """Check if company name matches query using flexible matching"""
+        company = company_name.lower()
+        search = query.lower()
+        
+        # Direct substring match
+        if search in company or company in search:
+            return True
+        
+        # Split into words and check for partial matches
+        company_words = set(company.split())
+        search_words = set(search.split())
+        
+        # Check if any search word is part of any company word or vice versa
+        for sword in search_words:
+            for cword in company_words:
+                if sword in cword or cword in sword:
+                    return True
+        
+        return False
+
     def _parse_query_period(self, query):
         """Parse the query to determine the period to analyze"""
         query = query.lower()
@@ -199,8 +240,8 @@ class SheetsAgent:
         
         return {'type': 'all_time'}
 
-    def get_training_summary(self, period=None):
-        """Get summary of trainings, their dates, and values"""
+    def get_training_summary(self, period=None, company_filter=None):
+        """Get summary of trainings, their dates, and values with optional company filter"""
         if self.sheet_data is None:
             raise ValueError('Sheet data not loaded. Call load_sheet_data first.')
         
@@ -240,6 +281,14 @@ class SheetsAgent:
                     filtered_data['Datum Inschrijving'].dt.year == previous_year
                 ]
         
+        if company_filter:
+            # Filter data for matching companies
+            filtered_data = filtered_data[
+                filtered_data['Bedrijf'].apply(
+                    lambda x: self._company_matches_query(x, company_filter)
+                )
+            ]
+        
         # Calculate percentages and trends
         previous_period_data = self._get_previous_period_data(period)
         
@@ -247,6 +296,7 @@ class SheetsAgent:
             'total_value': float(filtered_data['Omzet'].sum()),
             'trainings': {},
             'by_type': {},
+            'by_company': {},  # Add company summary
             'period': self._get_period_description(period),
             'trends': self._calculate_trends(filtered_data, previous_period_data)
         }
@@ -266,6 +316,15 @@ class SheetsAgent:
             summary['by_type'][type_name] = {
                 'total_revenue': float(group['Omzet'].sum()),
                 'total_registrations': len(group)
+            }
+        
+        # Group by Company
+        company_groups = filtered_data.groupby('Bedrijf')
+        for company, group in company_groups:
+            summary['by_company'][company] = {
+                'total_revenue': float(group['Omzet'].sum()),
+                'total_registrations': len(group),
+                'trainings': group['Training'].unique().tolist()
             }
         
         return summary
@@ -373,6 +432,14 @@ class SheetsAgent:
             context += f"- Inschrijfdatum: {data['registration_date']}\n"
             context += f"- Waarde: €{data['value']:,.2f}\n"
         
+        # Add company information
+        context += "\nInschrijvingen per Bedrijf:\n"
+        for company, data in summary['by_company'].items():
+            context += f"\n{company}:\n"
+            context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
+            context += f"- Aantal Inschrijvingen: {data['total_registrations']}\n"
+            context += f"- Trainingen: {', '.join(data['trainings'])}\n"
+        
         return context
         
     def _create_system_prompt(self, context, current_date):
@@ -383,12 +450,14 @@ class SheetsAgent:
             f"1. Omzet per maand of jaar\n"
             f"2. Vergelijkingen tussen periodes (percentages)\n"
             f"3. Overzichten van verkochte trainingen per type\n"
-            f"4. Trends en ontwikkelingen\n\n"
+            f"4. Analyses per bedrijf (inschrijvingen en trainingen)\n"
+            f"5. Trends en ontwikkelingen\n\n"
             f"De getoonde data bevat alle inschrijvingen. "
             f"Hier is de samenvatting van de gevraagde periode:\n\n{context}\n"
             f"Geef specifieke, data-gedreven antwoorden met waar mogelijk percentages en vergelijkingen. "
             f"Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
             f"Als er om vergelijkingen wordt gevraagd, toon dan de verschillen in percentages. "
+            f"Bij vragen over bedrijven, wees flexibel met bedrijfsnamen (bv. 'ING' matcht ook 'ING Bank'). "
             f"Geef je antwoord in het Nederlands."
         ) 
 
