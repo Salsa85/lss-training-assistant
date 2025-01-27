@@ -49,9 +49,11 @@ def main():
         print_with_scroll("   - Wat is de totale omzet van Rabobank dit jaar?")
         
         print_with_scroll("\n5. Export commando's:")
-        print_with_scroll("   - Exporteer alle data naar CSV")
-        print_with_scroll("   - Exporteer green belt trainingen van 2024")
+        print_with_scroll("   - Exporteer alle data")
+        print_with_scroll("   - Exporteer trainingen van januari 2024")
         print_with_scroll("   - Exporteer trainingen van ING")
+        print_with_scroll("   - Exporteer green belt trainingen van 2024")
+        print_with_scroll("   - Exporteer ING trainingen van vorige maand")
         
         while True:
             user_query = input("\nWat wil je weten over de trainingen? > ").strip()

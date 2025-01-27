@@ -413,7 +413,7 @@ class SheetsAgent:
             
             # Get response from OpenAI
             response = self.client.chat.completions.create(
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 messages=messages,
                 temperature=0.1,
                 max_tokens=500,
