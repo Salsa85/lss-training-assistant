@@ -15,6 +15,17 @@ from ratelimit import limits, sleep_and_retry
 import json
 import io
 import urllib.parse
+import azure.cognitiveservices.speech as speechsdk
+from .tools import (
+    clean_training_name, 
+    clean_company_name, 
+    standardize_date, 
+    company_matches_query,
+    get_sheets_service,
+    ONE_MINUTE,
+    MAX_REQUESTS_PER_MINUTE,
+    logger
+)
 
 # Setup logging
 logging.basicConfig(
@@ -23,27 +34,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-ONE_MINUTE = 60
-MAX_REQUESTS_PER_MINUTE = 50  # Aanpassen aan je OpenAI limiet
-
 class SheetsAgent:
     def __init__(self, credentials_file, spreadsheet_id):
         self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-        self.credentials_file = credentials_file  # Nodig voor lokale ontwikkeling
+        self.credentials_file = credentials_file
         self.spreadsheet_id = spreadsheet_id
         
-        # Initialize OpenAI (simplified)
+        # Initialize OpenAI
         if not os.getenv('OPENAI_API_KEY'):
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         self.client = OpenAI()
         
         # Initialize Google Sheets service
-        self.sheet_service = self._get_sheets_service()
+        self.sheet_service = get_sheets_service(credentials_file, self.SCOPES)
         self.sheet_data = None
-        
-        # Add conversation history
-        self.conversation_history = []
-        self.max_history = 5  # Aantal berichten om te onthouden
         
         # Define system prompt
         self.system_prompt = (
@@ -61,34 +65,6 @@ class SheetsAgent:
             "Geef je antwoord in het Nederlands."
         )
         
-    def _get_sheets_service(self):
-        # For Railway deployment
-        if os.getenv('RAILWAY_ENVIRONMENT'):
-            creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
-            if not creds_json:
-                raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment")
-            try:
-                creds_dict = json.loads(creds_json)
-                # Check if we have a refresh token
-                if 'refresh_token' in creds_dict:
-                    creds = Credentials.from_authorized_user_info(creds_dict, self.SCOPES)
-                else:
-                    # Fall back to client secrets
-                    flow = InstalledAppFlow.from_client_config(creds_dict, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
-            except Exception as e:
-                logger.error(f"Error initializing credentials: {str(e)}")
-                raise
-        else:
-            # For local development
-            if not os.path.exists(self.credentials_file):
-                raise ValueError(f"Credentials file not found at {self.credentials_file}")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                self.credentials_file, self.SCOPES)
-            creds = flow.run_local_server(port=0)
-        
-        return build('sheets', 'v4', credentials=creds)
-    
     def load_sheet_data(self, range_name):
         """Load data from specified range in Google Sheet"""
         try:
@@ -111,14 +87,14 @@ class SheetsAgent:
             df = df[required_columns]
             
             # Clean up training names
-            df['Training'] = df['Training'].apply(lambda x: self._clean_training_name(str(x)))
+            df['Training'] = df['Training'].apply(clean_training_name)
             
             # Clean up company names
-            df['Bedrijf'] = df['Bedrijf'].apply(lambda x: self._clean_company_name(str(x)))
+            df['Bedrijf'] = df['Bedrijf'].apply(clean_company_name)
             
             # Convert date strings to datetime
             df['Datum Inschrijving'] = pd.to_datetime(
-                df['Datum Inschrijving'].apply(self._standardize_date), 
+                df['Datum Inschrijving'].apply(standardize_date), 
                 format='%d-%m-%Y'
             )
             
@@ -391,10 +367,13 @@ class SheetsAgent:
                 temperature=0,
             )
             
-            return response.choices[0].message.content
+            response_text = response.choices[0].message.content
+            
+            return response_text
             
         except Exception as e:
-            raise Exception(f"Error querying OpenAI: {str(e)}")
+            error_msg = f"Error querying OpenAI: {str(e)}"
+            raise Exception(error_msg)
 
     def _create_context(self, summary, current_date):
         """Create context string from summary data"""
