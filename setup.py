@@ -4,7 +4,6 @@ setup(
     name="lss-training-assistant",
     version="0.1.0",
     packages=find_packages(),
-    package_dir={'': 'src'},
     install_requires=[
         'fastapi',
         'uvicorn',

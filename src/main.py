@@ -1,5 +1,5 @@
-from sheets_agent import SheetsAgent
-from config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
+from src.sheets_agent import SheetsAgent
+from src.config import GOOGLE_CREDENTIALS_FILE, SPREADSHEET_ID
 import os
 import json
 import warnings

@@ -21,7 +21,7 @@ import urllib.parse
 # from src.data_models import ...
 
 # Voeg deze imports toe
-from .tools import (
+from src.tools import (
     clean_training_name, 
     clean_company_name, 
     standardize_date, 
@@ -31,7 +31,7 @@ from .tools import (
     MAX_REQUESTS_PER_MINUTE,
     logger
 )
-from .data_models import Training, TrainingData
+from src.data_models import Training, TrainingData
 from typing import Optional
 
 # Setup logging
