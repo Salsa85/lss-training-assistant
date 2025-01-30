@@ -16,8 +16,12 @@ import json
 import io
 import urllib.parse
 
-# Verander deze imports
-from src.tools import (
+# Verwijder de oude imports
+# from src.tools import ...
+# from src.data_models import ...
+
+# Voeg deze imports toe
+from .tools import (
     clean_training_name, 
     clean_company_name, 
     standardize_date, 
@@ -27,7 +31,7 @@ from src.tools import (
     MAX_REQUESTS_PER_MINUTE,
     logger
 )
-from src.data_models import Training, TrainingData
+from .data_models import Training, TrainingData
 from typing import Optional
 
 # Setup logging
