@@ -16,13 +16,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="LSS Training API")
 
-# Add CORS middleware
+# Update CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In productie dit aanpassen naar specifieke origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+    max_age=3600,
 )
 
 # Initialize agent with error handling
