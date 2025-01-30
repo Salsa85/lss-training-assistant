@@ -15,7 +15,9 @@ from ratelimit import limits, sleep_and_retry
 import json
 import io
 import urllib.parse
-from .tools import (
+
+# Verander imports van src.tools naar tools
+from tools import (
     clean_training_name, 
     clean_company_name, 
     standardize_date, 
@@ -25,7 +27,7 @@ from .tools import (
     MAX_REQUESTS_PER_MINUTE,
     logger
 )
-from .data_models import Training, TrainingData
+from data_models import Training, TrainingData
 from typing import Optional
 
 # Setup logging
@@ -50,19 +52,49 @@ class SheetsAgent:
         self.sheet_service = get_sheets_service(credentials_file, self.SCOPES)
         self.training_data: Optional[TrainingData] = None
         
-        # Define system prompt
+        # Add conversation history
+        self.conversation_history = []
+        self.max_history = 5  # Aantal vorige berichten om te onthouden
+        
+        # Update system prompt
         self.system_prompt = (
             "Je bent een Nederlandse AI assistent die trainingsdata analyseert. "
-            "Je kunt de volgende soorten analyses uitvoeren:\n"
-            "1. Omzet per maand of jaar\n"
-            "2. Vergelijkingen tussen periodes (percentages)\n"
-            "3. Overzichten van verkochte trainingen per type\n"
-            "4. Analyses per bedrijf (inschrijvingen en trainingen)\n"
-            "5. Trends en ontwikkelingen\n\n"
-            "Geef specifieke, data-gedreven antwoorden met waar mogelijk percentages en vergelijkingen. "
-            "Gebruik het € symbool voor geldbedragen en gebruik punten voor duizendtallen. "
-            "Als er om vergelijkingen wordt gevraagd, toon dan de verschillen in percentages. "
-            "Bij vragen over bedrijven, wees flexibel met bedrijfsnamen (bv. 'ING' matcht ook 'ING Bank'). "
+            "Je hebt toegang tot de conversatie geschiedenis en kunt daardoor verwijzen naar eerdere vragen en antwoorden. "
+            "Je kunt de volgende soorten analyses uitvoeren:\n\n"
+            
+            "1. Omzet analyses:\n"
+            "   - Totale omzet per periode (maand/kwartaal/jaar)\n"
+            "   - Omzet per type training\n"
+            "   - Vergelijkingen tussen periodes\n\n"
+            
+            "2. Training analyses:\n"
+            "   - Aantal inschrijvingen per type training\n"
+            "   - Overzicht van verkochte trainingen\n"
+            "   - Verdeling tussen training types\n\n"
+            
+            "3. Periode analyses:\n"
+            "   - Deze/vorige maand\n"
+            "   - Specifieke maanden (bijv. 'januari 2024')\n"
+            "   - Kwartalen (Q1-Q4)\n"
+            "   - Jaren\n\n"
+            
+            "4. Trend analyses:\n"
+            "   - Vergelijkingen met vorige periodes\n"
+            "   - Groei percentages\n"
+            "   - Populaire training types\n\n"
+            
+            "Voorbeeldvragen:\n"
+            "- 'Wat is de omzet van vorige maand?'\n"
+            "- 'Hoeveel trainingen zijn er verkocht in Q4 2023?'\n"
+            "- 'Wat is de verdeling van training types dit jaar?'\n"
+            "- 'Vergelijk de omzet van januari met december'\n\n"
+            
+            "Geef specifieke, data-gedreven antwoorden met waar mogelijk:\n"
+            "- Exacte aantallen inschrijvingen\n"
+            "- Omzet per type training\n"
+            "- Percentages voor vergelijkingen\n"
+            "- € symbool voor geldbedragen\n"
+            "- Punten voor duizendtallen\n"
             "Geef je antwoord in het Nederlands."
         )
         
@@ -156,83 +188,110 @@ class SheetsAgent:
 
     def _parse_query_period(self, query):
         """Parse the query to determine the period to analyze"""
-        query = query.lower()
-        current_date = pd.Timestamp.now()
-        
-        # Check for quarter mentions
-        quarters = {
-            'q1': [1, 2, 3],
-            'eerste kwartaal': [1, 2, 3],
-            'q2': [4, 5, 6],
-            'tweede kwartaal': [4, 5, 6],
-            'q3': [7, 8, 9],
-            'derde kwartaal': [7, 8, 9],
-            'q4': [10, 11, 12],
-            'vierde kwartaal': [10, 11, 12]
-        }
-        
-        # Extract year for quarter
-        year_match = re.search(r'20\d{2}', query)
-        year = int(year_match.group()) if year_match else current_date.year
-        
-        # Check for quarter in query
-        for quarter_name, months in quarters.items():
-            if quarter_name in query:
-                return {
-                    'type': 'quarter',
-                    'year': year,
-                    'months': months,
-                    'quarter_name': quarter_name.upper() if quarter_name.startswith('q') else quarter_name
-                }
-        
-        # Check for year mentions
-        year_match = re.search(r'20\d{2}', query)
-        year = int(year_match.group()) if year_match else None
-        
-        # Validate year is not in future
-        if year and year > current_date.year:
-            raise ValueError(f"Kan geen data tonen voor het jaar {year} omdat dit in de toekomst ligt.")
-        
-        # Check for specific month mentions
-        months = {
-            'januari': 1, 'februari': 2, 'maart': 3, 'april': 4, 'mei': 5, 'juni': 6,
-            'juli': 7, 'augustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'december': 12
-        }
-        
-        # Check for year only queries
-        if year and not any(month in query for month in months):
-            return {
-                'type': 'year',
-                'year': year
+        try:
+            query = query.lower()
+            current_date = pd.Timestamp.now()
+            
+            # Check for specific month mentions
+            months = {
+                'januari': 1, 'februari': 2, 'maart': 3, 'april': 4, 'mei': 5, 'juni': 6,
+                'juli': 7, 'augustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'december': 12
             }
-        
-        # Check for month + year combinations
-        for month_name, month_num in months.items():
-            if month_name in query:
-                # Validate month/year combination is not in future
-                if year:
-                    future_date = pd.Timestamp(year=year, month=month_num, day=1)
-                    if future_date > current_date:
-                        raise ValueError(
-                            f"Kan geen data tonen voor {month_name} {year} omdat deze periode in de toekomst ligt."
-                        )
+            
+            # Extract year
+            year_match = re.search(r'20\d{2}', query)
+            year = int(year_match.group()) if year_match else current_date.year
+            
+            # Check for month mentions
+            for month_name, month_num in months.items():
+                if month_name in query:
+                    try:
+                        # Create start and end dates for the month
+                        start_date = pd.Timestamp(year=year, month=month_num, day=1)
+                        end_date = start_date + pd.offsets.MonthEnd(1)
+                        
+                        # Validate month is not in future
+                        if start_date > current_date:
+                            raise ValueError(
+                                f"Kan geen data tonen voor {month_name} {year} omdat deze periode in de toekomst ligt."
+                            )
+                        
+                        logger.info(f"Using specific month period: {start_date} to {end_date}")
+                        return start_date, end_date
+                    except Exception as e:
+                        logger.error(f"Error creating month dates: {str(e)}")
+                        raise ValueError(f"Kon geen datums maken voor {month_name} {year}: {str(e)}")
+            
+            # Check for relative periods
+            if 'deze maand' in query:
+                start_date = pd.Timestamp(year=current_date.year, month=current_date.month, day=1)
+                end_date = start_date + pd.offsets.MonthEnd(1)
+                logger.info(f"Using current month period: {start_date} to {end_date}")
+                return start_date, end_date
+            
+            if 'vorige maand' in query:
+                last_month = current_date - pd.DateOffset(months=1)
+                start_date = pd.Timestamp(year=last_month.year, month=last_month.month, day=1)
+                end_date = start_date + pd.offsets.MonthEnd(1)
+                logger.info(f"Using previous month period: {start_date} to {end_date}")
+                return start_date, end_date
+            
+            # Check for quarter mentions
+            quarters = {
+                'q1': (1, 3),
+                'eerste kwartaal': (1, 3),
+                'q2': (4, 6),
+                'tweede kwartaal': (4, 6),
+                'q3': (7, 9),
+                'derde kwartaal': (7, 9),
+                'q4': (10, 12),
+                'vierde kwartaal': (10, 12)
+            }
+            
+            # Check for quarter in query
+            for quarter_name, (start_month, end_month) in quarters.items():
+                if quarter_name in query:
+                    try:
+                        # Create start and end dates for the quarter
+                        start_date = pd.Timestamp(year=year, month=start_month, day=1)
+                        end_date = pd.Timestamp(year=year, month=end_month, day=1) + pd.offsets.MonthEnd(1)
+                        
+                        # Validate quarter is not in future
+                        if start_date > current_date:
+                            raise ValueError(
+                                f"Kan geen data tonen voor {quarter_name} {year} omdat deze periode in de toekomst ligt."
+                            )
+                        
+                        logger.info(f"Parsed period: {quarter_name} {year} ({start_date} to {end_date})")
+                        return start_date, end_date
+                    except Exception as e:
+                        logger.error(f"Error creating quarter dates: {str(e)}")
+                        raise ValueError(f"Kon geen datums maken voor {quarter_name} {year}: {str(e)}")
+            
+            # Check for year mentions
+            year_match = re.search(r'20\d{2}', query)
+            year = int(year_match.group()) if year_match else None
+            
+            # Validate year is not in future
+            if year and year > current_date.year:
+                raise ValueError(f"Kan geen data tonen voor het jaar {year} omdat dit in de toekomst ligt.")
+            
+            # Check for year only queries
+            if year and not any(month in query for month in months):
                 return {
-                    'type': 'specific_month',
-                    'year': year if year else current_date.year,
-                    'month': month_num
+                    'type': 'year',
+                    'year': year
                 }
-        
-        # Check for relative periods
-        if 'vorige maand' in query:
-            return {'type': 'previous_month'}
-        elif 'deze maand' in query:
-            return {'type': 'current_month'}
-        elif 'dit jaar' in query:
-            return {'type': 'current_year'}
-        elif 'vorig jaar' in query:
-            return {'type': 'previous_year'}
-        
-        return {'type': 'all_time'}
+            
+            # Default: return all time
+            min_date = pd.Timestamp(year=2000, month=1, day=1)
+            max_date = current_date
+            logger.info(f"Using default period: all time ({min_date} to {max_date})")
+            return min_date, max_date
+            
+        except Exception as e:
+            logger.error(f"Error in _parse_query_period: {str(e)}")
+            raise ValueError(f"Kon de periode niet bepalen: {str(e)}")
 
     def get_training_summary(self, period=None, company_filter=None):
         """Get summary of trainings, their dates, and values with optional company filter"""
@@ -305,45 +364,90 @@ class SheetsAgent:
     
     @sleep_and_retry
     @limits(calls=MAX_REQUESTS_PER_MINUTE, period=ONE_MINUTE)
-    def query_data(self, user_query):
+    def query_data(self, user_query: str) -> str:
         """Query the training data using OpenAI"""
         try:
-            if self.training_data is None:
+            if not self.training_data:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
             # Parse period from query
-            period = self._parse_query_period(user_query)
+            try:
+                period = self._parse_query_period(user_query.lower())
+                start_date = period[0]
+                end_date = period[1]
+            except Exception as e:
+                logger.error(f"Error parsing period: {str(e)}")
+                raise ValueError(f"Kon de periode niet bepalen: {str(e)}")
             
             # Filter data if period specified
-            filtered_data = (
-                self.training_data.filter_by_period(period[0], period[1])
-                if period else self.training_data
-            )
+            try:
+                filtered_data = (
+                    self.training_data.filter_by_period(start_date, end_date)
+                    if period else self.training_data
+                )
+            except Exception as e:
+                logger.error(f"Error filtering data: {str(e)}")
+                raise ValueError(f"Kon de data niet filteren: {str(e)}")
             
             # Create context with relevant statistics
-            context = {
-                "totale_omzet": filtered_data.get_total_revenue(),
-                "omzet_per_type": filtered_data.get_revenue_by_type(),
-                "aantal_trainingen": len(filtered_data.trainingen),
-                "periode": f"{period[0].strftime('%d-%m-%Y')} tot {period[1].strftime('%d-%m-%Y')}"
-                if period else "alle data"
-            }
+            try:
+                # Group by type for registration counts
+                type_counts = {}
+                type_revenue = {}
+                for training in filtered_data.trainingen:
+                    type_counts[training.type] = type_counts.get(training.type, 0) + 1
+                    type_revenue[training.type] = type_revenue.get(training.type, 0) + training.omzet
+                
+                context = {
+                    "totale_omzet": filtered_data.get_total_revenue(),
+                    "totaal_aantal_inschrijvingen": len(filtered_data.trainingen),
+                    "periode": f"{start_date.strftime('%d-%m-%Y')} tot {end_date.strftime('%d-%m-%Y')}",
+                    "per_type": {
+                        type_name: {
+                            "aantal_inschrijvingen": count,
+                            "omzet": revenue
+                        }
+                        for type_name, count, revenue in zip(
+                            type_counts.keys(),
+                            type_counts.values(),
+                            type_revenue.values()
+                        )
+                    }
+                }
+                
+                logger.info(f"Created context with {len(type_counts)} training types")
+                
+            except Exception as e:
+                logger.error(f"Error creating context: {str(e)}")
+                raise ValueError(f"Kon de context niet maken: {str(e)}")
             
+            # Create messages array with system prompt and conversation history
             messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": f"Context:\n{json.dumps(context, indent=2)}\n\nVraag: {user_query}"}
+                {"role": "system", "content": self.system_prompt}
             ]
             
+            # Add conversation history
+            messages.extend(self.conversation_history[-self.max_history:])
+            
+            # Add current query
+            messages.append({"role": "user", "content": f"Context:\n{json.dumps(context, indent=2)}\n\nVraag: {user_query}"})
+            
+            # Get response from OpenAI
             response = self.client.chat.completions.create(
                 model="gpt-4-0125-preview",
                 messages=messages,
                 temperature=0,
             )
             
+            # Store the conversation
+            self.conversation_history.append({"role": "user", "content": user_query})
+            self.conversation_history.append({"role": "assistant", "content": response.choices[0].message.content})
+            
             return response.choices[0].message.content
             
         except Exception as e:
-            raise Exception(f"Error querying OpenAI: {str(e)}")
+            logger.error(f"Unexpected error in query_data: {str(e)}")
+            raise ValueError(f"Er is een fout opgetreden: {str(e)}")
 
     def _create_context(self, summary, current_date):
         """Create context string from summary data"""

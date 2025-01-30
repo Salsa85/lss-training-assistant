@@ -1,0 +1,3 @@
+"""
+LSS Training Assistant package
+""" 

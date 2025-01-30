@@ -1,3 +1,10 @@
+"""
+Tools module for the LSS Training Assistant
+
+This module contains helper functions for data cleaning, API rate limiting,
+and service initialization.
+"""
+
 from openai import OpenAI
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -16,21 +23,31 @@ import json
 import io
 import urllib.parse
 
+# Constants
+ONE_MINUTE = 60
+MAX_REQUESTS_PER_MINUTE = 60
+
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ONE_MINUTE = 60
-MAX_REQUESTS_PER_MINUTE = 50
-
-def clean_training_name(training_name):
-    """Remove dates and clean up training names"""
+def clean_training_name(training_name: str) -> str:
+    """
+    Clean and standardize training names by removing dates and extra whitespace.
+    
+    Args:
+        training_name (str): The raw training name from the spreadsheet
+        
+    Returns:
+        str: Cleaned training name
+        
+    Example:
+        >>> clean_training_name("Green Belt Training 12/12/2024")
+        "Green Belt Training"
+    """
     if not isinstance(training_name, str):
         training_name = str(training_name)
-        
+    
     # Remove dates in format dd/mm/yyyy or d/m/yyyy
     training_name = re.sub(r'\s+\d{1,2}/\d{1,2}/\d{4}', '', training_name)
     
@@ -42,14 +59,26 @@ def clean_training_name(training_name):
     
     return training_name.strip()
 
-def clean_company_name(company_name):
-    """Clean and standardize company names"""
+def clean_company_name(company_name: str) -> str:
+    """
+    Clean and standardize company names by removing legal suffixes and normalizing whitespace.
+    
+    Args:
+        company_name (str): The raw company name from the spreadsheet
+        
+    Returns:
+        str: Cleaned company name
+        
+    Example:
+        >>> clean_company_name("ACME B.V.")
+        "ACME"
+    """
     if not isinstance(company_name, str):
         company_name = str(company_name)
     
     # Basic cleaning
     company_name = company_name.strip()
-    company_name = ' '.join(company_name.split())  # Normalize whitespace
+    company_name = ' '.join(company_name.split())
     
     # Remove common legal suffixes
     suffixes = [' bv', ' b.v.', ' nv', ' n.v.', ' inc', ' ltd']
@@ -59,22 +88,48 @@ def clean_company_name(company_name):
     
     return company_name.strip()
 
-def standardize_date(date_str):
-    """Standardize date format"""
+def standardize_date(date_str: str) -> str:
+    """
+    Convert various date formats to standard dd-mm-yyyy format.
+    
+    Args:
+        date_str (str): Date string in various formats
+        
+    Returns:
+        str: Standardized date string in dd-mm-yyyy format
+        
+    Example:
+        >>> standardize_date("1/1/2024")
+        "01-01-2024"
+    """
     try:
         if not isinstance(date_str, str):
             date_str = str(date_str)
-        # Remove any leading/trailing whitespace
         date_str = date_str.strip()
-        # Parse the date
-        date_obj = pd.to_datetime(date_str, format='%d-%m-%Y')
+        
+        # Parse using pandas (implementation in sheets_agent.py)
+        from pandas import to_datetime
+        date_obj = to_datetime(date_str, format='%d-%m-%Y')
         return date_obj.strftime('%d-%m-%Y')
     except:
         logger.warning(f"Could not parse date: {date_str}")
         return date_str
 
-def company_matches_query(company_name, query):
-    """Check if company name matches query using flexible matching"""
+def company_matches_query(company_name: str, query: str) -> bool:
+    """
+    Check if a company name matches a search query using flexible matching.
+    
+    Args:
+        company_name (str): The company name to check
+        query (str): The search query to match against
+        
+    Returns:
+        bool: True if the company matches the query
+        
+    Example:
+        >>> company_matches_query("ING Bank Nederland", "ing")
+        True
+    """
     company = company_name.lower()
     search = query.lower()
     
@@ -86,7 +141,6 @@ def company_matches_query(company_name, query):
     company_words = set(company.split())
     search_words = set(search.split())
     
-    # Check if any search word is part of any company word or vice versa
     for sword in search_words:
         for cword in company_words:
             if sword in cword or cword in sword:
@@ -94,31 +148,39 @@ def company_matches_query(company_name, query):
     
     return False
 
-def get_sheets_service(credentials_file, scopes):
-    """Initialize and return Google Sheets service"""
-    # For Railway deployment
-    if os.getenv('RAILWAY_ENVIRONMENT'):
-        creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
-        if not creds_json:
-            raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment")
-        try:
-            creds_dict = json.loads(creds_json)
-            # Check if we have a refresh token
-            if 'refresh_token' in creds_dict:
-                creds = Credentials.from_authorized_user_info(creds_dict, scopes)
-            else:
-                # Fall back to client secrets
-                flow = InstalledAppFlow.from_client_config(creds_dict, scopes)
-                creds = flow.run_local_server(port=0)
-        except Exception as e:
-            logger.error(f"Error initializing credentials: {str(e)}")
-            raise
-    else:
-        # For local development
-        if not os.path.exists(credentials_file):
-            raise ValueError(f"Credentials file not found at {credentials_file}")
-        flow = InstalledAppFlow.from_client_secrets_file(
-            credentials_file, scopes)
-        creds = flow.run_local_server(port=0)
+def get_sheets_service(credentials_file: str, scopes: list) -> object:
+    """
+    Initialize and return a Google Sheets service object.
     
+    Args:
+        credentials_file (str): Path to the Google credentials file
+        scopes (list): List of required Google API scopes
+        
+    Returns:
+        object: Authenticated Google Sheets service
+        
+    Example:
+        >>> service = get_sheets_service('credentials.json', ['https://www.googleapis.com/auth/spreadsheets.readonly'])
+    """
+    creds = None
+    token_path = 'token.pickle'
+
+    # Load existing credentials
+    if os.path.exists(token_path):
+        with open(token_path, 'rb') as token:
+            creds = pickle.load(token)
+
+    # Refresh or create new credentials
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, scopes)
+            creds = flow.run_local_server(port=0)
+            
+        # Save credentials
+        with open(token_path, 'wb') as token:
+            pickle.dump(creds, token)
+
+    # Build and return service
     return build('sheets', 'v4', credentials=creds) 

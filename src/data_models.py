@@ -3,6 +3,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import pandas as pd
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Training:
@@ -59,11 +62,25 @@ class TrainingData:
 
     def filter_by_period(self, start_date: datetime, end_date: datetime) -> 'TrainingData':
         """Filter trainings by date range"""
-        filtered = [
-            t for t in self.trainingen 
-            if start_date <= t.datum_inschrijving <= end_date
-        ]
-        return TrainingData(trainingen=filtered)
+        try:
+            logger.info(f"Filtering data between {start_date} and {end_date}")
+            logger.info(f"Total trainings before filter: {len(self.trainingen)}")
+            
+            filtered = []
+            for training in self.trainingen:
+                if start_date <= training.datum_inschrijving <= end_date:
+                    filtered.append(training)
+            
+            logger.info(f"Total trainings after filter: {len(filtered)}")
+            
+            if not filtered:
+                logger.warning(f"No trainings found between {start_date} and {end_date}")
+            
+            return TrainingData(trainingen=filtered)
+            
+        except Exception as e:
+            logger.error(f"Error filtering by period: {str(e)}")
+            raise ValueError(f"Kon data niet filteren op periode: {str(e)}")
 
     def filter_by_type(self, type_query: str) -> 'TrainingData':
         """Filter trainings by type"""
@@ -83,14 +100,26 @@ class TrainingData:
 
     def get_total_revenue(self) -> float:
         """Calculate total revenue"""
-        return sum(t.omzet for t in self.trainingen)
+        try:
+            total = sum(t.omzet for t in self.trainingen)
+            logger.info(f"Calculated total revenue: {total}")
+            return total
+        except Exception as e:
+            logger.error(f"Error calculating total revenue: {str(e)}")
+            raise ValueError(f"Kon totale omzet niet berekenen: {str(e)}")
 
     def get_revenue_by_type(self) -> Dict[str, float]:
         """Calculate revenue per type"""
-        revenue_by_type = {}
-        for t in self.trainingen:
-            revenue_by_type[t.type] = revenue_by_type.get(t.type, 0) + t.omzet
-        return revenue_by_type
+        try:
+            revenue_by_type = {}
+            for t in self.trainingen:
+                revenue_by_type[t.type] = revenue_by_type.get(t.type, 0) + t.omzet
+            
+            logger.info(f"Calculated revenue by type: {revenue_by_type}")
+            return revenue_by_type
+        except Exception as e:
+            logger.error(f"Error calculating revenue by type: {str(e)}")
+            raise ValueError(f"Kon omzet per type niet berekenen: {str(e)}")
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert back to DataFrame"""
