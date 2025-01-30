@@ -9,6 +9,7 @@ from datetime import datetime
 from prometheus_client import Counter, Histogram
 import time
 import io
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +17,28 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="LSS Training API")
 
-# Update CORS middleware
+# Define allowed origins
+ALLOWED_ORIGINS = [
+    "https://trainingen.leansixsigmagroep.nl",
+    "http://localhost:8501",  # Voor lokale Streamlit development
+    "http://localhost:3000",  # Voor lokale React development
+    "https://agenda:8890"     # Voor andere development URLs
+]
+
+# Update CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In productie dit aanpassen naar specifieke origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Methods",
+        "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Credentials"
+    ],
     expose_headers=["Content-Disposition"],
     max_age=3600,
 )
