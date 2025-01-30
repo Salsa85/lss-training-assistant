@@ -45,7 +45,11 @@ GOOGLE_CREDENTIALS_FILE = os.path.join(CREDENTIALS_DIR, CREDENTIALS_FILE)
 
 # Validate credentials file
 if not os.path.exists(GOOGLE_CREDENTIALS_FILE):
-    raise ValueError(f"Google credentials file not found at {GOOGLE_CREDENTIALS_FILE}")
+    raise ValueError(
+        f"Google credentials file not found at {GOOGLE_CREDENTIALS_FILE}\n"
+        "Please create this file with your Google OAuth credentials.\n"
+        "See README.md for instructions on how to set up credentials."
+    )
 
 # Validate credentials format
 try:
