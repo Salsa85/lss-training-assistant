@@ -25,6 +25,8 @@ from .tools import (
     MAX_REQUESTS_PER_MINUTE,
     logger
 )
+from .data_models import Training, TrainingData
+from typing import Optional
 
 # Setup logging
 logging.basicConfig(
@@ -46,7 +48,7 @@ class SheetsAgent:
         
         # Initialize Google Sheets service
         self.sheet_service = get_sheets_service(credentials_file, self.SCOPES)
-        self.sheet_data = None
+        self.training_data: Optional[TrainingData] = None
         
         # Define system prompt
         self.system_prompt = (
@@ -67,48 +69,21 @@ class SheetsAgent:
     def load_sheet_data(self, range_name):
         """Load data from specified range in Google Sheet"""
         try:
-            # Fetch data from Google Sheets
             result = self.sheet_service.spreadsheets().values().get(
-                spreadsheetId=self.spreadsheet_id, 
-                range=range_name,
-                valueRenderOption='FORMATTED_VALUE'
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name
             ).execute()
             
-            values = result.get('values', [])
-            if not values:
-                raise ValueError('No data found in sheet')
-            
-            # Create DataFrame
-            df = pd.DataFrame(values[1:], columns=values[0])
-            
-            # Update required columns to include Bedrijf
-            required_columns = ['Datum Inschrijving', 'Training', 'Omzet', 'Type', 'Bedrijf']
-            df = df[required_columns]
-            
-            # Clean up training names
-            df['Training'] = df['Training'].apply(clean_training_name)
-            
-            # Clean up company names
-            df['Bedrijf'] = df['Bedrijf'].apply(clean_company_name)
-            
-            # Convert date strings to datetime
-            df['Datum Inschrijving'] = pd.to_datetime(
-                df['Datum Inschrijving'].apply(standardize_date), 
-                format='%d-%m-%Y'
+            # Convert to DataFrame
+            df = pd.DataFrame(
+                result.get('values', [])[1:],  # Skip header row
+                columns=result.get('values', [])[0]  # Use header row as columns
             )
             
-            # Convert Omzet to float, removing € and . characters
-            df['Omzet'] = df['Omzet'].replace('[\€\.]', '', regex=True).str.replace(',', '.').astype(float)
+            # Convert to TrainingData
+            self.training_data = TrainingData.from_sheet_data(df)
             
-            # Sort by date
-            df = df.sort_values('Datum Inschrijving')
-            
-            # Store the data
-            self.sheet_data = df
-            
-            logger.info(f"Loaded {len(df)} rows of data from {df['Datum Inschrijving'].min()} to {df['Datum Inschrijving'].max()}")
-            
-            return self.sheet_data
+            return True
             
         except Exception as e:
             logger.error(f"Error loading sheet data: {str(e)}")
@@ -261,63 +236,20 @@ class SheetsAgent:
 
     def get_training_summary(self, period=None, company_filter=None):
         """Get summary of trainings, their dates, and values with optional company filter"""
-        if self.sheet_data is None:
+        if self.training_data is None:
             raise ValueError('Sheet data not loaded. Call load_sheet_data first.')
         
-        filtered_data = self.sheet_data.copy()
-        
-        if isinstance(period, dict):
-            if period['type'] == 'quarter':
-                filtered_data = filtered_data[
-                    (filtered_data['Datum Inschrijving'].dt.month.isin(period['months'])) &
-                    (filtered_data['Datum Inschrijving'].dt.year == period['year'])
-                ]
-            elif period['type'] == 'specific_month':
-                filtered_data = filtered_data[
-                    (filtered_data['Datum Inschrijving'].dt.month == period['month']) &
-                    (filtered_data['Datum Inschrijving'].dt.year == period['year'])
-                ]
-            elif period['type'] == 'year':
-                filtered_data = filtered_data[
-                    filtered_data['Datum Inschrijving'].dt.year == period['year']
-                ]
-            elif period['type'] == 'current_month':
-                current_date = pd.Timestamp.now()
-                filtered_data = filtered_data[
-                    filtered_data['Datum Inschrijving'].dt.to_period('M') == 
-                    current_date.to_period('M')
-                ]
-            elif period['type'] == 'previous_month':
-                current_date = pd.Timestamp.now()
-                previous_month = (current_date - pd.DateOffset(months=1))
-                filtered_data = filtered_data[
-                    filtered_data['Datum Inschrijving'].dt.to_period('M') == 
-                    previous_month.to_period('M')
-                ]
-            elif period['type'] == 'current_year':
-                current_year = pd.Timestamp.now().year
-                filtered_data = filtered_data[
-                    filtered_data['Datum Inschrijving'].dt.year == current_year
-                ]
-            elif period['type'] == 'previous_year':
-                previous_year = pd.Timestamp.now().year - 1
-                filtered_data = filtered_data[
-                    filtered_data['Datum Inschrijving'].dt.year == previous_year
-                ]
+        filtered_data = self.training_data.filter_by_period(period[0], period[1]) if period else self.training_data
         
         if company_filter:
             # Filter data for matching companies
-            filtered_data = filtered_data[
-                filtered_data['Bedrijf'].apply(
-                    lambda x: self._company_matches_query(x, company_filter)
-                )
-            ]
+            filtered_data = filtered_data.filter_by_company(company_filter)
         
         # Calculate percentages and trends
         previous_period_data = self._get_previous_period_data(period)
         
         summary = {
-            'total_value': float(filtered_data['Omzet'].sum()),
+            'total_value': filtered_data.get_total_revenue(),
             'trainings': {},
             'by_type': {},
             'by_company': {},  # Add company summary
@@ -326,29 +258,29 @@ class SheetsAgent:
         }
         
         # Group by training
-        training_groups = filtered_data.groupby('Training')
-        for training, group in training_groups:
-            summary['trainings'][training] = {
-                'total_registrations': len(group),
-                'registration_date': group['Datum Inschrijving'].iloc[0].strftime('%d-%m-%Y'),
-                'value': float(group['Omzet'].sum())
+        training_groups = filtered_data.trainingen
+        for training in training_groups:
+            summary['trainings'][training.training_naam] = {
+                'total_registrations': 1,
+                'registration_date': training.datum_inschrijving.strftime('%d-%m-%Y'),
+                'value': training.omzet
             }
         
         # Group by Type
-        type_groups = filtered_data.groupby('Type')
-        for type_name, group in type_groups:
+        type_groups = [t.type for t in training_groups]
+        for type_name in type_groups:
             summary['by_type'][type_name] = {
-                'total_revenue': float(group['Omzet'].sum()),
-                'total_registrations': len(group)
+                'total_revenue': sum(t.omzet for t in training_groups if t.type == type_name),
+                'total_registrations': len([t for t in training_groups if t.type == type_name])
             }
         
         # Group by Company
-        company_groups = filtered_data.groupby('Bedrijf')
-        for company, group in company_groups:
+        company_groups = [t.bedrijf for t in training_groups]
+        for company in company_groups:
             summary['by_company'][company] = {
-                'total_revenue': float(group['Omzet'].sum()),
-                'total_registrations': len(group),
-                'trainings': group['Training'].unique().tolist()
+                'total_revenue': sum(t.omzet for t in training_groups if t.bedrijf.lower() == company.lower()),
+                'total_registrations': len([t for t in training_groups if t.bedrijf.lower() == company.lower()]),
+                'trainings': [t.training_naam for t in training_groups if t.bedrijf.lower() == company.lower()]
             }
         
         return summary
@@ -374,38 +306,44 @@ class SheetsAgent:
     @sleep_and_retry
     @limits(calls=MAX_REQUESTS_PER_MINUTE, period=ONE_MINUTE)
     def query_data(self, user_query):
-        """Query the sheet data using OpenAI with retry logic"""
+        """Query the training data using OpenAI"""
         try:
-            if self.sheet_data is None:
+            if self.training_data is None:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
-            # Parse period from query first
+            # Parse period from query
             period = self._parse_query_period(user_query)
             
-            # Get summary based on period
-            summary = self.get_training_summary(period)
+            # Filter data if period specified
+            filtered_data = (
+                self.training_data.filter_by_period(period[0], period[1])
+                if period else self.training_data
+            )
             
-            # Create context
-            context = self._create_context(summary, pd.Timestamp.now())
+            # Create context with relevant statistics
+            context = {
+                "totale_omzet": filtered_data.get_total_revenue(),
+                "omzet_per_type": filtered_data.get_revenue_by_type(),
+                "aantal_trainingen": len(filtered_data.trainingen),
+                "periode": f"{period[0].strftime('%d-%m-%Y')} tot {period[1].strftime('%d-%m-%Y')}"
+                if period else "alle data"
+            }
             
             messages = [
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": f"Context:\n{context}\n\nVraag: {user_query}"}
+                {"role": "user", "content": f"Context:\n{json.dumps(context, indent=2)}\n\nVraag: {user_query}"}
             ]
             
             response = self.client.chat.completions.create(
-                model="gpt-4-turbo-preview",
+                model="gpt-4-0125-preview",
                 messages=messages,
                 temperature=0,
             )
             
-            response_text = response.choices[0].message.content
-            
-            return response_text
+            return response.choices[0].message.content
             
         except Exception as e:
-            error_msg = f"Error querying OpenAI: {str(e)}"
-            raise Exception(error_msg)
+            raise Exception(f"Error querying OpenAI: {str(e)}")
 
     def _create_context(self, summary, current_date):
         """Create context string from summary data"""
@@ -471,8 +409,8 @@ class SheetsAgent:
 
     def _calculate_trends(self, current_data, previous_data):
         """Calculate trends and percentages between periods"""
-        current_total = float(current_data['Omzet'].sum())
-        previous_total = float(previous_data['Omzet'].sum() if previous_data is not None else 0)
+        current_total = float(current_data.get_total_revenue())
+        previous_total = float(previous_data.get_total_revenue() if previous_data is not None else 0)
         
         trends = {
             'total_change_percentage': ((current_total - previous_total) / previous_total * 100) 
@@ -481,10 +419,10 @@ class SheetsAgent:
         }
         
         # Calculate changes per type
-        current_by_type = current_data.groupby('Type')['Omzet'].sum()
+        current_by_type = current_data.get_revenue_by_type()
         if previous_data is not None:
-            previous_by_type = previous_data.groupby('Type')['Omzet'].sum()
-            for type_name in current_by_type.index:
+            previous_by_type = previous_data.get_revenue_by_type()
+            for type_name in current_by_type.keys():
                 current_value = float(current_by_type.get(type_name, 0))
                 previous_value = float(previous_by_type.get(type_name, 0))
                 trends['by_type'][type_name] = {
@@ -501,90 +439,29 @@ class SheetsAgent:
         if not isinstance(period, dict):
             return None
         
-        previous_data = self.sheet_data.copy()
+        previous_data = self.training_data.filter_by_period(period[0] - pd.DateOffset(years=1), period[0] - pd.DateOffset(days=1))
         
-        if period['type'] == 'specific_month':
-            # Get previous month's data
-            if period['month'] == 1:
-                prev_month = 12
-                prev_year = period['year'] - 1
-            else:
-                prev_month = period['month'] - 1
-                prev_year = period['year']
-            
-            previous_data = previous_data[
-                (previous_data['Datum Inschrijving'].dt.month == prev_month) &
-                (previous_data['Datum Inschrijving'].dt.year == prev_year)
-            ]
-        
-        elif period['type'] == 'year':
-            # Get previous year's data
-            previous_data = previous_data[
-                previous_data['Datum Inschrijving'].dt.year == period['year'] - 1
-            ]
-        
-        elif period['type'] == 'current_month':
-            # Get previous month's data
-            current_date = pd.Timestamp.now()
-            previous_month = (current_date - pd.DateOffset(months=1))
-            previous_data = previous_data[
-                previous_data['Datum Inschrijving'].dt.to_period('M') == 
-                previous_month.to_period('M')
-            ]
-        
-        elif period['type'] == 'current_year':
-            # Get previous year's data
-            current_year = pd.Timestamp.now().year
-            previous_data = previous_data[
-                previous_data['Datum Inschrijving'].dt.year == current_year - 1
-            ]
-        
-        else:
-            return None
-        
-        return previous_data if not previous_data.empty else None 
+        return previous_data if not previous_data.trainingen.empty else None 
 
     def export_to_csv(self, filename=None, period=None, company_filter=None):
         """Export data to CSV with optional period and company filters"""
         try:
-            if self.sheet_data is None:
+            if self.training_data is None:
                 raise ValueError('Geen data geladen. Roep eerst load_sheet_data aan.')
             
             # Start with a copy of the data
-            export_data = self.sheet_data.copy()
-            
-            # Apply period filter if specified
-            if isinstance(period, dict):
-                if period['type'] == 'quarter':
-                    export_data = export_data[
-                        (export_data['Datum Inschrijving'].dt.month.isin(period['months'])) &
-                        (export_data['Datum Inschrijving'].dt.year == period['year'])
-                    ]
-                elif period['type'] == 'specific_month':
-                    export_data = export_data[
-                        (export_data['Datum Inschrijving'].dt.month == period['month']) &
-                        (export_data['Datum Inschrijving'].dt.year == period['year'])
-                    ]
-                elif period['type'] == 'year':
-                    export_data = export_data[
-                        export_data['Datum Inschrijving'].dt.year == period['year']
-                    ]
-                # ... andere period filters ...
+            export_data = self.training_data.filter_by_period(period[0], period[1]) if period else self.training_data
             
             # Apply company filter if specified
             if company_filter:
-                export_data = export_data[
-                    export_data['Bedrijf'].apply(
-                        lambda x: self._company_matches_query(x, company_filter)
-                    )
-                ]
+                export_data = export_data.filter_by_company(company_filter)
             
             # Format data...
             
             # Handle both file and StringIO output
             if isinstance(filename, io.StringIO):
                 # Write directly to StringIO
-                export_data.to_csv(
+                export_data.to_dataframe().to_csv(
                     filename,
                     index=False,
                     sep=';',
@@ -602,7 +479,7 @@ class SheetsAgent:
                     filename += '.csv'
                 
                 # Export to file
-                export_data.to_csv(
+                export_data.to_dataframe().to_csv(
                     filename,
                     index=False,
                     sep=';',
@@ -620,29 +497,21 @@ class SheetsAgent:
         
         # Filter by year
         if 'year' in filters:
-            filtered_data = filtered_data[
-                filtered_data['Datum Inschrijving'].dt.year == filters['year']
-            ]
+            filtered_data = filtered_data.filter_by_period(pd.Timestamp(year=filters['year'], month=1, day=1), pd.Timestamp(year=filters['year'], month=12, day=31))
         
         # Filter by month
         if 'month' in filters:
-            filtered_data = filtered_data[
-                filtered_data['Datum Inschrijving'].dt.month == filters['month']
-            ]
+            filtered_data = filtered_data.filter_by_period(pd.Timestamp(year=pd.Timestamp.now().year, month=filters['month'], day=1), pd.Timestamp(year=pd.Timestamp.now().year, month=filters['month'], day=31))
         
         # Filter by training type
         if 'training_type' in filters:
             type_query = filters['training_type'].lower()
-            filtered_data = filtered_data[
-                filtered_data['Type'].str.lower().str.contains(type_query)
-            ]
+            filtered_data = filtered_data.filter_by_type(type_query)
         
         # Filter by specific training
         if 'training' in filters:
             training_query = filters['training'].lower()
-            filtered_data = filtered_data[
-                filtered_data['Training'].str.lower().str.contains(training_query)
-            ]
+            filtered_data = filtered_data.filter_by_training(training_query)
         
         return filtered_data
 
