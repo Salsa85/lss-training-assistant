@@ -15,7 +15,6 @@ from ratelimit import limits, sleep_and_retry
 import json
 import io
 import urllib.parse
-import azure.cognitiveservices.speech as speechsdk
 from .tools import (
     clean_training_name, 
     clean_company_name, 
