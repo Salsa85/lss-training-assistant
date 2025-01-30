@@ -16,13 +16,23 @@ class Training:
     @classmethod
     def from_row(cls, row: pd.Series) -> 'Training':
         """Create Training instance from DataFrame row"""
-        return cls(
-            datum_inschrijving=pd.to_datetime(row['Datum Inschrijving']),
-            training_naam=row['Training'],
-            omzet=float(str(row['Omzet']).replace('€', '').replace('.', '').replace(',', '.')),
-            type=row['Type'],
-            bedrijf=row['Bedrijf']
-        )
+        try:
+            # Parse date with explicit format
+            datum = pd.to_datetime(row['Datum Inschrijving'], format='%d-%m-%Y')
+            
+            # Clean omzet value
+            omzet_str = str(row['Omzet'])
+            omzet = float(omzet_str.replace('€', '').replace('.', '').replace(',', '.'))
+            
+            return cls(
+                datum_inschrijving=datum,
+                training_naam=row['Training'],
+                omzet=omzet,
+                type=row['Type'],
+                bedrijf=row['Bedrijf']
+            )
+        except Exception as e:
+            raise ValueError(f"Error parsing row: {str(e)}\nRow data: {row}")
 
 @dataclass
 class TrainingData:
@@ -32,7 +42,19 @@ class TrainingData:
     @classmethod
     def from_sheet_data(cls, df: pd.DataFrame) -> 'TrainingData':
         """Create TrainingData from DataFrame"""
-        trainingen = [Training.from_row(row) for _, row in df.iterrows()]
+        trainingen = []
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                training = Training.from_row(row)
+                trainingen.append(training)
+            except Exception as e:
+                errors.append(f"Row {idx}: {str(e)}")
+        
+        if errors:
+            raise ValueError(f"Errors parsing data:\n" + "\n".join(errors))
+            
         return cls(trainingen=trainingen)
 
     def filter_by_period(self, start_date: datetime, end_date: datetime) -> 'TrainingData':

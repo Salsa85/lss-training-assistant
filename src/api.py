@@ -78,14 +78,33 @@ async def root():
     return {"status": "ok"}
 
 @app.post("/vraag")
-async def stel_vraag(query: Query):
+async def process_question(vraag: Query):
+    """Process a question about the training data"""
     try:
-        logger.info(f"Processing question: {query.vraag}")
-        response = agent.query_data(query.vraag)
+        logger.info(f"Processing question: {vraag.vraag}")
+        
+        if not agent.training_data:
+            logger.error("No training data loaded")
+            raise HTTPException(
+                status_code=500,
+                detail="Training data not loaded. Please try again later."
+            )
+        
+        response = agent.query_data(vraag.vraag)
+        if not response:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not generate response. Please try again."
+            )
+        
         return {"antwoord": response}
+        
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing question: {str(e)}"
+        )
 
 @app.get("/ververs")
 async def ververs_data():
