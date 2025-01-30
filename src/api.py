@@ -52,7 +52,7 @@ try:
     logger.info("SheetsAgent initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize SheetsAgent: {str(e)}")
-    raise
+    agent = None
 
 # Metrics
 REQUEST_COUNT = Counter('api_requests_total', 'Total API requests', ['endpoint'])
@@ -78,10 +78,16 @@ async def root():
     return {"status": "ok"}
 
 @app.post("/vraag")
-async def process_question(vraag: Query):
+async def process_question(query: Query):
     """Process a question about the training data"""
     try:
-        logger.info(f"Processing question: {vraag.vraag}")
+        if agent is None:
+            raise HTTPException(
+                status_code=503,
+                detail="SheetsAgent not initialized. Please try again later."
+            )
+
+        logger.info(f"Processing question: {query.vraag}")
         
         if not agent.training_data:
             logger.error("No training data loaded")
@@ -90,7 +96,7 @@ async def process_question(vraag: Query):
                 detail="Training data not loaded. Please try again later."
             )
         
-        response = agent.query_data(vraag.vraag)
+        response = agent.query_data(query.vraag)
         if not response:
             raise HTTPException(
                 status_code=500,
@@ -118,11 +124,10 @@ async def ververs_data():
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
-    }
+    """Basic health check endpoint"""
+    if agent is None:
+        raise HTTPException(status_code=503, detail="SheetsAgent not initialized")
+    return {"status": "healthy"}
 
 @app.get("/export")
 @app.post("/export")

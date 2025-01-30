@@ -149,38 +149,49 @@ def company_matches_query(company_name: str, query: str) -> bool:
     return False
 
 def get_sheets_service(credentials_file: str, scopes: list) -> object:
-    """
-    Initialize and return a Google Sheets service object.
-    
-    Args:
-        credentials_file (str): Path to the Google credentials file
-        scopes (list): List of required Google API scopes
-        
-    Returns:
-        object: Authenticated Google Sheets service
-        
-    Example:
-        >>> service = get_sheets_service('credentials.json', ['https://www.googleapis.com/auth/spreadsheets.readonly'])
-    """
-    creds = None
-    token_path = 'token.pickle'
+    """Initialize and return a Google Sheets service object."""
+    try:
+        creds = None
+        token_path = 'token.pickle'
 
-    # Load existing credentials
-    if os.path.exists(token_path):
-        with open(token_path, 'rb') as token:
-            creds = pickle.load(token)
-
-    # Refresh or create new credentials
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+        # Check if we're running on Railway
+        if os.getenv('RAILWAY_ENVIRONMENT'):
+            logger.info("Running on Railway, using environment credentials")
+            try:
+                # Get credentials from environment
+                creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
+                if not creds_json:
+                    raise ValueError("GOOGLE_CREDENTIALS_JSON environment variable not found")
+                
+                # Parse credentials
+                creds_data = json.loads(creds_json)
+                creds = Credentials.from_authorized_user_info(creds_data, scopes)
+                
+            except Exception as e:
+                logger.error(f"Error loading Railway credentials: {str(e)}")
+                raise
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, scopes)
-            creds = flow.run_local_server(port=0)
-            
-        # Save credentials
-        with open(token_path, 'wb') as token:
-            pickle.dump(creds, token)
+            logger.info("Running locally, using file credentials")
+            # Local development flow
+            if os.path.exists(token_path):
+                with open(token_path, 'rb') as token:
+                    creds = pickle.load(token)
 
-    # Build and return service
-    return build('sheets', 'v4', credentials=creds) 
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    flow = InstalledAppFlow.from_client_secrets_file(credentials_file, scopes)
+                    creds = flow.run_local_server(port=0)
+                
+                with open(token_path, 'wb') as token:
+                    pickle.dump(creds, token)
+
+        # Build and return service
+        service = build('sheets', 'v4', credentials=creds)
+        logger.info("Successfully created Sheets service")
+        return service
+
+    except Exception as e:
+        logger.error(f"Error in get_sheets_service: {str(e)}")
+        raise 
