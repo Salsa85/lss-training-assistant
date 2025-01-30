@@ -1,82 +1,84 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Dict, Optional
 import pandas as pd
 import re
 
 @dataclass
 class Training:
+    """Represents a single training registration"""
     datum_inschrijving: datetime
     training_naam: str
-    training_datum: datetime
     omzet: float
     type: str
-    voornaam: str
-    achternaam: str
     bedrijf: str
-    email: str
-    
+
     @classmethod
-    def from_sheet_row(cls, row):
-        """Create Training object from sheet row"""
-        # Extract training date from training name
-        training_name = str(row['Training'])
-        training_date_match = re.search(r'\d{2}/\d{2}/\d{4}', training_name)
-        training_date = None
-        if training_date_match:
-            date_str = training_date_match.group(0)
-            training_date = datetime.strptime(date_str, '%d/%m/%Y')
-            training_name = training_name.replace(date_str, '').strip()
-            
+    def from_row(cls, row: pd.Series) -> 'Training':
+        """Create Training instance from DataFrame row"""
         return cls(
             datum_inschrijving=pd.to_datetime(row['Datum Inschrijving']),
-            training_naam=training_name,
-            training_datum=training_date,
-            omzet=float(row['Omzet']),
+            training_naam=row['Training'],
+            omzet=float(str(row['Omzet']).replace('€', '').replace('.', '').replace(',', '.')),
             type=row['Type'],
-            voornaam=row['Voornaam'],
-            achternaam=row['Achternaam'],
-            bedrijf=row['Bedrijf'],
-            email=row['E-mailadres']
+            bedrijf=row['Bedrijf']
         )
 
 @dataclass
 class TrainingData:
+    """Collection of training registrations with filtering capabilities"""
     trainingen: List[Training]
-    
+
     @classmethod
-    def from_sheet_data(cls, df: pd.DataFrame):
-        """Create TrainingData from sheet DataFrame"""
-        trainingen = [Training.from_sheet_row(row) for _, row in df.iterrows()]
+    def from_sheet_data(cls, df: pd.DataFrame) -> 'TrainingData':
+        """Create TrainingData from DataFrame"""
+        trainingen = [Training.from_row(row) for _, row in df.iterrows()]
         return cls(trainingen=trainingen)
-    
-    def to_dataframe(self) -> pd.DataFrame:
-        """Convert back to DataFrame if needed"""
-        return pd.DataFrame([vars(t) for t in self.trainingen])
-    
+
     def filter_by_period(self, start_date: datetime, end_date: datetime) -> 'TrainingData':
-        """Filter trainingen by period"""
+        """Filter trainings by date range"""
         filtered = [
             t for t in self.trainingen 
             if start_date <= t.datum_inschrijving <= end_date
         ]
         return TrainingData(trainingen=filtered)
-    
-    def filter_by_company(self, company: str) -> 'TrainingData':
-        """Filter trainingen by company"""
+
+    def filter_by_type(self, type_query: str) -> 'TrainingData':
+        """Filter trainings by type"""
         filtered = [
             t for t in self.trainingen 
-            if company.lower() in t.bedrijf.lower()
+            if type_query.lower() in t.type.lower()
         ]
         return TrainingData(trainingen=filtered)
-    
+
+    def filter_by_company(self, company_query: str) -> 'TrainingData':
+        """Filter trainings by company"""
+        filtered = [
+            t for t in self.trainingen 
+            if company_query.lower() in t.bedrijf.lower()
+        ]
+        return TrainingData(trainingen=filtered)
+
     def get_total_revenue(self) -> float:
         """Calculate total revenue"""
         return sum(t.omzet for t in self.trainingen)
-    
-    def get_revenue_by_type(self) -> dict:
-        """Get revenue grouped by training type"""
+
+    def get_revenue_by_type(self) -> Dict[str, float]:
+        """Calculate revenue per type"""
         revenue_by_type = {}
         for t in self.trainingen:
             revenue_by_type[t.type] = revenue_by_type.get(t.type, 0) + t.omzet
-        return revenue_by_type 
+        return revenue_by_type
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Convert back to DataFrame"""
+        return pd.DataFrame([
+            {
+                'Datum Inschrijving': t.datum_inschrijving.strftime('%d-%m-%Y'),
+                'Training': t.training_naam,
+                'Omzet': f'€ {t.omzet:,.2f}',
+                'Type': t.type,
+                'Bedrijf': t.bedrijf
+            }
+            for t in self.trainingen
+        ]) 
