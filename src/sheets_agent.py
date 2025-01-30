@@ -184,6 +184,32 @@ class SheetsAgent:
         query = query.lower()
         current_date = pd.Timestamp.now()
         
+        # Check for quarter mentions
+        quarters = {
+            'q1': [1, 2, 3],
+            'eerste kwartaal': [1, 2, 3],
+            'q2': [4, 5, 6],
+            'tweede kwartaal': [4, 5, 6],
+            'q3': [7, 8, 9],
+            'derde kwartaal': [7, 8, 9],
+            'q4': [10, 11, 12],
+            'vierde kwartaal': [10, 11, 12]
+        }
+        
+        # Extract year for quarter
+        year_match = re.search(r'20\d{2}', query)
+        year = int(year_match.group()) if year_match else current_date.year
+        
+        # Check for quarter in query
+        for quarter_name, months in quarters.items():
+            if quarter_name in query:
+                return {
+                    'type': 'quarter',
+                    'year': year,
+                    'months': months,
+                    'quarter_name': quarter_name.upper() if quarter_name.startswith('q') else quarter_name
+                }
+        
         # Check for year mentions
         year_match = re.search(r'20\d{2}', query)
         year = int(year_match.group()) if year_match else None
@@ -241,7 +267,12 @@ class SheetsAgent:
         filtered_data = self.sheet_data.copy()
         
         if isinstance(period, dict):
-            if period['type'] == 'specific_month':
+            if period['type'] == 'quarter':
+                filtered_data = filtered_data[
+                    (filtered_data['Datum Inschrijving'].dt.month.isin(period['months'])) &
+                    (filtered_data['Datum Inschrijving'].dt.year == period['year'])
+                ]
+            elif period['type'] == 'specific_month':
                 filtered_data = filtered_data[
                     (filtered_data['Datum Inschrijving'].dt.month == period['month']) &
                     (filtered_data['Datum Inschrijving'].dt.year == period['year'])
@@ -325,7 +356,9 @@ class SheetsAgent:
     def _get_period_description(self, period):
         """Get description for the selected period"""
         if isinstance(period, dict):
-            if period['type'] == 'specific_month':
+            if period['type'] == 'quarter':
+                return f"{period['quarter_name']} {period['year']}"
+            elif period['type'] == 'specific_month':
                 months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
                          'juli', 'augustus', 'september', 'oktober', 'november', 'december']
                 month_name = months[period['month'] - 1]
@@ -382,13 +415,14 @@ class SheetsAgent:
         
         # Totale omzet voor de periode
         context += f"Totale Omzet: €{summary['total_value']:,.2f}\n"
+        context += f"Aantal Inschrijvingen: {sum(data['total_registrations'] for data in summary['by_type'].values())}\n\n"
         
         # Voeg trend informatie toe
         if 'trends' in summary and summary['trends'].get('total_change_percentage', 0) != 0:
-            context += f"Verschil met vorige periode: {summary['trends']['total_change_percentage']:.1f}%\n"
+            context += f"Verschil met vorige periode: {summary['trends']['total_change_percentage']:.1f}%\n\n"
         
         # Omzet per type voor de periode
-        context += "\nOmzet per Type:\n"
+        context += "Omzet per Type:\n"
         for type_name, data in summary['by_type'].items():
             context += f"\n{type_name}:\n"
             context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
@@ -400,21 +434,17 @@ class SheetsAgent:
                 if trend['previous_value'] > 0:
                     context += f"- Verschil met vorige periode: {trend['change_percentage']:.1f}%\n"
         
-        # Training details
-        context += "\nTraining Details:\n"
-        for training, data in summary['trainings'].items():
+        # Gedetailleerde inschrijvingen
+        context += "\nGedetailleerde Inschrijvingen:\n"
+        sorted_trainings = sorted(
+            summary['trainings'].items(),
+            key=lambda x: pd.to_datetime(x[1]['registration_date'], format='%d-%m-%Y')
+        )
+        for training, data in sorted_trainings:
             context += f"\n{training}:\n"
-            context += f"- Inschrijvingen: {data['total_registrations']}\n"
             context += f"- Inschrijfdatum: {data['registration_date']}\n"
-            context += f"- Waarde: €{data['value']:,.2f}\n"
-        
-        # Add company information
-        context += "\nInschrijvingen per Bedrijf:\n"
-        for company, data in summary['by_company'].items():
-            context += f"\n{company}:\n"
-            context += f"- Totale Omzet: €{data['total_revenue']:,.2f}\n"
-            context += f"- Aantal Inschrijvingen: {data['total_registrations']}\n"
-            context += f"- Trainingen: {', '.join(data['trainings'])}\n"
+            context += f"- Aantal: {data['total_registrations']}\n"
+            context += f"- Omzet: €{data['value']:,.2f}\n"
         
         return context
         
@@ -525,7 +555,12 @@ class SheetsAgent:
             
             # Apply period filter if specified
             if isinstance(period, dict):
-                if period['type'] == 'specific_month':
+                if period['type'] == 'quarter':
+                    export_data = export_data[
+                        (export_data['Datum Inschrijving'].dt.month.isin(period['months'])) &
+                        (export_data['Datum Inschrijving'].dt.year == period['year'])
+                    ]
+                elif period['type'] == 'specific_month':
                     export_data = export_data[
                         (export_data['Datum Inschrijving'].dt.month == period['month']) &
                         (export_data['Datum Inschrijving'].dt.year == period['year'])
